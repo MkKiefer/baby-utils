@@ -19,9 +19,9 @@ import type { Backup } from './backup'
  * device importing the other's file, converges on the same log.
  *
  * The same rules apply to every synced log — `feeds` and `weights` — through one generic
- * core. Settings and the baby profile are single documents
- * with no sensible merge, so they stay device-local; `restoreBackup` still replaces a
- * whole device when that is what you want.
+ * core. Settings and the baby profile travel with relay sync instead, merged per field
+ * (`settingsSync.ts`); a backup file merge leaves them alone, and `restoreBackup` still
+ * replaces a whole device when that is what you want.
  *
  * Tombstones are kept forever. They are ~100 bytes each and only appear when a feed is
  * deleted, so pruning them would buy little and would risk resurrecting an entry that a

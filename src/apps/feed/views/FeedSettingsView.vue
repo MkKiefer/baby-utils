@@ -256,6 +256,7 @@ async function testNotification() {
 
     <!-- ================================================================ reminders -->
     <h2 class="section-title">Reminders</h2>
+    <p class="tiny faint">Reminder options belong to this phone and are not shared by sync.</p>
     <div class="card stack">
       <div>
         <strong>Unanswered reminders before pausing</strong>

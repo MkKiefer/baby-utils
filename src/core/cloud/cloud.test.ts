@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createHandler, groupIdFor, PREFIX } from '../../../server/http.ts'
 import { SyncStore } from '../../../server/store.ts'
 import { mergeFeedRecords, mergeWeightRecords } from '../merge'
+import { countFields, mergeSyncedDocs, type SyncedDocs } from '../settingsSync'
 import type { FeedEntry } from '@/apps/feed/logic/types'
 import type { WeightEntry } from '@/apps/weight/logic/types'
 import { relayClient, type RelayClient } from './api'
@@ -80,6 +81,7 @@ class Phone {
   records = new Map<string, FeedEntry>()
   weights = new Map<string, WeightEntry>()
   state: CloudState = emptyState()
+  docs: SyncedDocs = {}
   config: CloudConfig
   device: Device
 
@@ -100,11 +102,25 @@ class Phone {
         for (const e of weights.writes) this.weights.set(e.id, e)
         return { ...feeds.stats, added: feeds.stats.added + weights.stats.added }
       },
+      readDocs: async () => structuredClone(this.docs),
+      mergeDocs: async (incoming) => {
+        const changes = mergeSyncedDocs(this.docs, incoming)
+        for (const [key, fields] of Object.entries(changes)) Object.assign((this.docs[key] ??= {}), fields)
+        return countFields(changes)
+      },
     }
   }
 
   add(e: FeedEntry) {
     this.records.set(e.id, e)
+  }
+
+  set(key: string, field: string, value: unknown, at: number) {
+    ;(this.docs[key] ??= {})[field] = { at, value }
+  }
+
+  get(key: string, field: string) {
+    return this.docs[key]?.[field]?.value
   }
 
   sync() {
@@ -275,5 +291,42 @@ describe('relay sync', () => {
     await a.sync()
     await b.sync()
     expect(b.live()).toEqual(['a1', 'a2'])
+  })
+
+  it('syncs settings per field, newest change winning', async () => {
+    const { phones } = await group('A', 'B', 'C')
+    const [a, b, c] = phones as [Phone, Phone, Phone]
+    a.set('feed.settings', 'intervalMode', 'manual', 10)
+    a.set('feed.settings', 'manualIntervalMin', 150, 10)
+    b.set('feed.settings', 'intervalMode', 'auto', 0) // default, never touched
+    await a.sync()
+    await b.sync()
+    await a.sync()
+    await b.sync()
+    expect(b.get('feed.settings', 'intervalMode')).toBe('manual')
+    expect(b.get('feed.settings', 'manualIntervalMin')).toBe(150)
+
+    // Different fields changed on both phones at once: both changes survive.
+    a.set('feed.settings', 'manualIntervalMin', 165, 20)
+    b.set('profile', 'name', 'Mia', 21)
+    b.set('weight.settings', 'unit', 'lb', 21)
+    const round = await a.sync()
+    await b.sync()
+    await a.sync()
+    expect(round.settingsSent).toBe(1)
+    for (const p of [a, b]) {
+      expect(p.get('feed.settings', 'manualIntervalMin')).toBe(165)
+      expect(p.get('profile', 'name')).toBe('Mia')
+      expect(p.get('weight.settings', 'unit')).toBe('lb')
+    }
+
+    // A late phone gets every setting in its snapshot.
+    await c.sync()
+    await a.sync()
+    await c.sync()
+    expect(c.docs).toEqual(a.docs)
+
+    // Nothing is resent once the group has it.
+    expect((await a.sync()).settingsSent).toBe(0)
   })
 })

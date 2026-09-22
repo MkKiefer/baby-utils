@@ -1,6 +1,7 @@
 import type { FeedEntry } from '@/apps/feed/logic/types'
 import type { WeightEntry } from '@/apps/weight/logic/types'
 import type { IncomingRecords, MergeStats } from '../merge'
+import { countFields, foldDocs, type SyncedDocs } from '../settingsSync'
 import type { RelayClient } from './api'
 import { decryptMessage, encryptMessage, newMemberId, type GroupKeys } from './crypto'
 
@@ -18,6 +19,7 @@ import { decryptMessage, encryptMessage, newMemberId, type GroupKeys } from './c
  *      gets the history the relay never buffered for it.
  *
  * Merging is the usual union by id with `updatedAt` LWW, so duplicates are harmless.
+ * Synced settings ride along the same way, per field (see `settingsSync.ts`).
  */
 
 export interface CloudConfig {
@@ -39,6 +41,10 @@ export interface RoundResult {
   /** Members that got a full-log snapshot. */
   snapshots: number
   merged: MergeStats | null
+  /** Settings fields taken over from the group. */
+  settingsMerged: number
+  /** Settings fields sent to the whole group. */
+  settingsSent: number
   /** The relay had dropped this device (inactive too long), so it joined again. */
   rejoined: boolean
 }
@@ -46,6 +52,8 @@ export interface RoundResult {
 export interface CloudState {
   /** Entry key (see `knownKey`) → version the group already has. */
   known: Record<string, number>
+  /** `doc/field` → settings version the group already has. */
+  knownDocs: Record<string, number>
   /** The other members at the end of the last round. */
   members: string[]
   /** Other members' device names, from their decrypted messages. */
@@ -64,6 +72,8 @@ export interface SyncPayload {
   feeds: FeedEntry[]
   /** Added with the weight tracker; missing from older app versions, which ignore it. */
   weights?: WeightEntry[]
+  /** Synced settings (see `settingsSync.ts`); missing from app versions before settings sync. */
+  docs?: SyncedDocs
 }
 
 /** Every synced record on a device, tombstones included. */
@@ -78,6 +88,9 @@ export interface Device {
   relay: RelayClient
   readRecords(): Promise<SyncRecords>
   merge(incoming: IncomingRecords, from: number): Promise<MergeStats>
+  readDocs(): Promise<SyncedDocs>
+  /** Merges settings from the group; returns how many fields changed here. */
+  mergeDocs(docs: SyncedDocs): Promise<number>
   now?: () => number
 }
 
@@ -96,7 +109,16 @@ export function recordCount(records: SyncRecords): number {
 export const CHUNK = 1500
 
 export function emptyState(): CloudState {
-  return { known: {}, members: [], labels: {}, joined: false, lastSyncAt: null, lastError: null, lastRound: null }
+  return {
+    known: {},
+    knownDocs: {},
+    members: [],
+    labels: {},
+    joined: false,
+    lastSyncAt: null,
+    lastError: null,
+    lastRound: null,
+  }
 }
 
 function isPayload(value: unknown): value is SyncPayload {
@@ -116,7 +138,31 @@ function markKnown(state: CloudState, records: SyncRecords) {
   for (const kind of KINDS) for (const e of records[kind]) state.known[knownKey(kind, e.id)] = e.updatedAt
 }
 
-async function send(dev: Device, keys: GroupKeys, config: CloudConfig, records: SyncRecords, to?: string[]) {
+/** Settings fields whose current version the group has not seen. */
+export function pendingDocs(docs: SyncedDocs, known: Record<string, number>): SyncedDocs {
+  const out: SyncedDocs = {}
+  for (const [key, fields] of Object.entries(docs)) {
+    for (const [f, field] of Object.entries(fields)) {
+      if (known[`${key}/${f}`] !== field.at) (out[key] ??= {})[f] = field
+    }
+  }
+  return out
+}
+
+function markDocs(known: Record<string, number>, docs: SyncedDocs) {
+  for (const [key, fields] of Object.entries(docs)) {
+    for (const [f, field] of Object.entries(fields)) known[`${key}/${f}`] = field.at
+  }
+}
+
+async function send(
+  dev: Device,
+  keys: GroupKeys,
+  config: CloudConfig,
+  records: SyncRecords,
+  docs: SyncedDocs,
+  to?: string[],
+) {
   const now = dev.now?.() ?? Date.now()
   // Chunk across both kinds, so a message never exceeds CHUNK entries in total.
   const items = KINDS.flatMap((kind) => records[kind].map((entry) => ({ kind, entry })))
@@ -130,6 +176,8 @@ async function send(dev: Device, keys: GroupKeys, config: CloudConfig, records: 
       feeds: slice.filter((x) => x.kind === 'feeds').map((x) => x.entry as FeedEntry),
       weights: slice.filter((x) => x.kind === 'weights').map((x) => x.entry as WeightEntry),
     }
+    // Settings are small: they go with the first chunk only.
+    if (i === 0 && countFields(docs)) payload.docs = docs
     const body = await encryptMessage(keys, config.memberId, payload)
     if ((await dev.relay.post(keys.token, config.memberId, body, to)) !== null) delivered = true
   }
@@ -146,6 +194,8 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
     sent: 0,
     snapshots: 0,
     merged: null,
+    settingsMerged: 0,
+    settingsSent: 0,
     rejoined: false,
   }
 
@@ -156,15 +206,16 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
     // so the others notice and send their whole log, and resend ours.
     config.memberId = newMemberId()
     created = (await relay.join(g, config.memberId)).created
-    Object.assign(state, { known: {}, members: [] })
+    Object.assign(state, { known: {}, knownDocs: {}, members: [] })
     result.rejoined = true
   }
-  if (created) state.known = {}
+  if (created) Object.assign(state, { known: {}, knownDocs: {} })
   state.joined = true
 
   // 2. Receive.
   const { messages, members } = await relay.fetch(g, config.memberId)
   const incoming = { feeds: [] as FeedEntry[], weights: [] as WeightEntry[] }
+  const incomingDocs: unknown[] = []
   let latest = 0
   for (const msg of messages) {
     try {
@@ -172,6 +223,7 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
       if (!isPayload(payload)) throw new Error('bad payload')
       incoming.feeds.push(...payload.feeds)
       if (Array.isArray(payload.weights)) incoming.weights.push(...payload.weights)
+      if (payload.docs) incomingDocs.push(payload.docs)
       if (typeof payload.label === 'string') state.labels[msg.from] = payload.label.slice(0, 40)
       latest = Math.max(latest, payload.sentAt)
       result.received++
@@ -180,6 +232,8 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
     }
   }
   if (recordCount(incoming)) result.merged = await dev.merge(incoming, latest)
+  const docsIn = foldDocs(incomingDocs)
+  if (countFields(docsIn)) result.settingsMerged = await dev.mergeDocs(docsIn)
   // Rejected ones too: they will never decrypt, and would otherwise be held forever.
   if (messages.length) await relay.ack(g, config.memberId, messages.map((m) => m.id))
 
@@ -191,24 +245,34 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
       if (e && byId.get(e.id)?.updatedAt === e.updatedAt) state.known[knownKey(kind, e.id)] = e.updatedAt
     }
   }
+  const docs = await dev.readDocs()
+  for (const [key, fields] of Object.entries(docsIn)) {
+    for (const [f, field] of Object.entries(fields)) {
+      if (docs[key]?.[f]?.at === field.at) state.knownDocs[`${key}/${f}`] = field.at
+    }
+  }
 
   // 3. Send changes to everyone (on a fresh join also an empty hello, so others learn our name).
   const others = members.map((m) => m.id).filter((id) => id !== config.memberId)
   const newcomers = others.filter((id) => !state.members.includes(id))
   const delta = pendingEntries(records, state.known)
   const deltaCount = recordCount(delta)
+  const docDelta = pendingDocs(docs, state.knownDocs)
+  const docCount = countFields(docDelta)
   let everyoneHasAll = false
-  if (others.length && (deltaCount || created)) {
-    if (await send(dev, keys, config, delta)) {
+  if (others.length && (deltaCount || docCount || created)) {
+    if (await send(dev, keys, config, delta, docDelta)) {
       markKnown(state, delta)
+      markDocs(state.knownDocs, docDelta)
       result.sent = deltaCount
-      everyoneHasAll = deltaCount === recordCount(records)
+      result.settingsSent = docCount
+      everyoneHasAll = deltaCount === recordCount(records) && docCount === countFields(docs)
     }
   }
 
-  // 4. Full log for members that are new to us.
+  // 4. Full log and settings for members that are new to us.
   if (newcomers.length && !everyoneHasAll) {
-    await send(dev, keys, config, records, newcomers)
+    await send(dev, keys, config, records, docs, newcomers)
     result.snapshots = newcomers.length
   }
 

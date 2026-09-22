@@ -2,10 +2,11 @@
 import { onMounted, ref } from 'vue'
 import { SYNC_API } from '@/core/cloud/api'
 import { decryptMessage, encryptMessage, newMemberId } from '@/core/cloud/crypto'
-import { pendingEntries, recordCount } from '@/core/cloud/engine'
+import { pendingDocs, pendingEntries, recordCount } from '@/core/cloud/engine'
 import { cloud, cloudLog, groupKeys, POLL_MS, relayHealth } from '@/core/cloud/service'
 import { cameraSupported, nativeQrSupported, scannerState } from '@/core/scanner'
 import { getDB } from '@/core/db'
+import { countFields, readSyncedDocs, SYNCED_DOCS, type SyncedDocs } from '@/core/settingsSync'
 import { formatDateTime } from '@/core/time'
 import { readFeedRecords } from '@/apps/feed/logic/repo'
 import { readWeightRecords } from '@/apps/weight/logic/repo'
@@ -14,6 +15,7 @@ import JsonView from '../components/JsonView.vue'
 /** Relay sync: config, derived ids, what is pending, the relay's health and a crypto self-test. */
 const info = ref<Record<string, string>>({})
 const log = ref<unknown[]>([])
+const docs = ref<SyncedDocs>({})
 const health = ref('')
 const selfTest = ref('')
 const revealSecret = ref(false)
@@ -27,6 +29,7 @@ async function readRecords() {
 async function refresh() {
   const c = cloud.config
   const records = await readRecords()
+  docs.value = await readSyncedDocs(await getDB())
   info.value = {
     API: SYNC_API,
     'Web Crypto (subtle)': globalThis.crypto?.subtle ? 'yes' : 'no',
@@ -49,6 +52,7 @@ async function refresh() {
         const p = pendingEntries(records, cloud.state.known)
         return `${p.feeds.length} feeds, ${p.weights.length} weighings`
       })(),
+      'Settings fields pending to send': String(countFields(pendingDocs(docs.value, cloud.state.knownDocs ?? {}))),
     })
   }
   log.value = [...cloudLog]
@@ -116,6 +120,12 @@ defineExpose({ refresh })
 
   <strong class="small">Sync state (localStorage sync.state)</strong>
   <JsonView :value="{ ...cloud.state, known: `${Object.keys(cloud.state.known).length} entries` }" />
+  <strong class="small">Synced settings (fields with their stamps, IndexedDB kv sync.stamps)</strong>
+  <p class="tiny muted">
+    Stamp 0 = default or adopted on join, 1 = set before settings sync existed. Phone-only fields:
+    {{ Object.entries(SYNCED_DOCS).map(([k, s]) => `${k}: ${s.local?.join(', ') || '—'}`).join('; ') }}
+  </p>
+  <JsonView :value="docs" />
   <strong class="small">Rounds this session</strong>
   <JsonView :value="log" />
   <strong class="small">Scanner state (pairing)</strong>

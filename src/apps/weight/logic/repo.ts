@@ -1,4 +1,5 @@
 import { newId, plain, type DB } from '@/core/db'
+import { writeSyncedDoc } from '@/core/settingsSync'
 import { parseLocalDate } from '@/core/age'
 import type { Profile } from '@/core/profile'
 import { DEFAULT_WEIGHT_SETTINGS, WEIGHT_SETTINGS_KEY, type WeightEntry, type WeightSettings } from './types'
@@ -10,8 +11,9 @@ export async function readWeightSettings(db: DB): Promise<WeightSettings> {
   return { ...DEFAULT_WEIGHT_SETTINGS, ...stored }
 }
 
-export async function writeWeightSettings(db: DB, settings: WeightSettings): Promise<void> {
-  await db.put('kv', plain(settings), WEIGHT_SETTINGS_KEY)
+/** Stamps what changed, so the change reaches the other phones of a sync group. */
+export function writeWeightSettings(db: DB, settings: WeightSettings): Promise<void> {
+  return writeSyncedDoc(db, WEIGHT_SETTINGS_KEY, settings)
 }
 
 /** Live entries, oldest first. Tombstones stay in the store for merging. */

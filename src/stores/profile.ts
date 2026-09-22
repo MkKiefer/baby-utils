@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { getDB, kvSet } from '@/core/db'
+import { getDB } from '@/core/db'
+import { writeSyncedDoc } from '@/core/settingsSync'
 import { PROFILE_KEY, readProfile, type Profile } from '@/core/profile'
 import { emitChange, onChange } from '@/core/sync'
 import { ageInfo, nextMilestone } from '@/core/age'
@@ -23,7 +24,7 @@ export const useProfileStore = defineStore('profile', () => {
   }
 
   async function save(next: Profile) {
-    await kvSet(PROFILE_KEY, next)
+    await writeSyncedDoc(await getDB(), PROFILE_KEY, next)
     profile.value = next
     emitChange('profile')
   }

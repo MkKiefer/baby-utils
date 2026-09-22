@@ -56,6 +56,17 @@ export const DEFAULT_FEED_SETTINGS: FeedSettings = {
 
 export const FEED_SETTINGS_KEY = 'feed.settings'
 
+/** Fills in what an older stored document lacks, nested groups included. */
+export function withFeedDefaults(stored: Partial<FeedSettings> | undefined): FeedSettings {
+  return {
+    ...DEFAULT_FEED_SETTINGS,
+    ...stored,
+    jaundice: { ...DEFAULT_FEED_SETTINGS.jaundice, ...stored?.jaundice },
+    rhythm: { ...DEFAULT_FEED_SETTINGS.rhythm, ...stored?.rhythm },
+    night: { ...DEFAULT_FEED_SETTINGS.night, ...stored?.night },
+  }
+}
+
 export const KIND_LABEL: Record<FeedKind, string> = {
   left: 'Left',
   right: 'Right',

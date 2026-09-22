@@ -3,7 +3,8 @@ import { ageDays } from '@/core/age'
 import { readProfile } from '@/core/profile'
 import { DAY } from '@/core/time'
 import { computeFeedPlan, badgeFor, type FeedPlan } from './plan'
-import { DEFAULT_FEED_SETTINGS, FEED_SETTINGS_KEY, type FeedEntry, type FeedSettings } from './types'
+import { writeSyncedDoc } from '@/core/settingsSync'
+import { FEED_SETTINGS_KEY, withFeedDefaults, type FeedEntry, type FeedSettings } from './types'
 import type { NotificationProvider } from '@/core/notify/types'
 
 /** IndexedDB access for the feed timer. DOM/Vue free: used by the service worker too. */
@@ -12,18 +13,12 @@ import type { NotificationProvider } from '@/core/notify/types'
 export const PLAN_HISTORY_MS = 8 * DAY
 
 export async function readFeedSettings(db: DB): Promise<FeedSettings> {
-  const stored = (await db.get('kv', FEED_SETTINGS_KEY)) as Partial<FeedSettings> | undefined
-  return {
-    ...DEFAULT_FEED_SETTINGS,
-    ...stored,
-    jaundice: { ...DEFAULT_FEED_SETTINGS.jaundice, ...stored?.jaundice },
-    rhythm: { ...DEFAULT_FEED_SETTINGS.rhythm, ...stored?.rhythm },
-    night: { ...DEFAULT_FEED_SETTINGS.night, ...stored?.night },
-  }
+  return withFeedDefaults((await db.get('kv', FEED_SETTINGS_KEY)) as Partial<FeedSettings> | undefined)
 }
 
-export async function writeFeedSettings(db: DB, settings: FeedSettings): Promise<void> {
-  await db.put('kv', plain(settings), FEED_SETTINGS_KEY)
+/** Stamps what changed, so the change reaches the other phones of a sync group. */
+export function writeFeedSettings(db: DB, settings: FeedSettings): Promise<void> {
+  return writeSyncedDoc(db, FEED_SETTINGS_KEY, settings)
 }
 
 /** Drops tombstones: deleted entries stay in the store so merges can see the deletion. */

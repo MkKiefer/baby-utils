@@ -1,7 +1,8 @@
 import { reactive } from 'vue'
 import { getDB } from '../db'
 import { mergeIncoming } from '../merge'
-import { onChange } from '../sync'
+import { applySyncedDocs, demoteSyncedDocs, mergeSyncedDocs, readSyncedDocs, type SyncedDocs } from '../settingsSync'
+import { emitChange, onChange, type ChangeScope } from '../sync'
 import { detectPlatform } from '../platform'
 import { readFeedRecords } from '@/apps/feed/logic/repo'
 import { readWeightRecords } from '@/apps/weight/logic/repo'
@@ -24,6 +25,8 @@ const STATE_KEY = 'sync.state'
 export const POLL_MS = 30_000
 /** Wait after a local edit, so a burst of edits goes out as one message. */
 const DEBOUNCE_MS = 1500
+/** Local edits that have something for the group. */
+const SYNCED_SCOPES: ChangeScope[] = ['feeds', 'weights', 'profile', 'feed.settings', 'weight.settings']
 
 function load<T>(key: string): T | null {
   try {
@@ -106,6 +109,8 @@ export function syncNow(): Promise<void> {
                 return { feeds, weights }
               },
               merge: (incoming, from) => mergeIncoming(incoming, from, 'cloud'),
+              readDocs: async () => readSyncedDocs(await getDB()),
+              mergeDocs,
             },
             await groupKeys(config.secret),
             config,
@@ -127,8 +132,18 @@ export function syncNow(): Promise<void> {
   return running
 }
 
-async function setup(secret: string, label: string) {
+/** Takes over the group's newer settings; announces them so the stores reload. */
+async function mergeDocs(incoming: SyncedDocs): Promise<number> {
+  const db = await getDB()
+  const count = await applySyncedDocs(db, mergeSyncedDocs(await readSyncedDocs(db), incoming))
+  if (count) emitChange('all')
+  return count
+}
+
+async function setup(secret: string, label: string, joining: boolean) {
   if (cloud.config) await leaveGroup()
+  // A joining phone adopts the group's settings rather than pushing its own over them.
+  if (joining) await demoteSyncedDocs(await getDB())
   cloud.config = { secret, memberId: newMemberId(), label: label.trim() || defaultDeviceLabel(), enabled: true, createdAt: Date.now() }
   cloud.state = emptyState()
   save()
@@ -136,11 +151,11 @@ async function setup(secret: string, label: string) {
 }
 
 export function createGroup(label: string): Promise<void> {
-  return setup(newGroupSecret(), label)
+  return setup(newGroupSecret(), label, false)
 }
 
 export function joinGroup(secret: string, label: string): Promise<void> {
-  return setup(secret, label)
+  return setup(secret, label, true)
 }
 
 /** Tells the relay to stop holding messages for this device, then forgets the group. */
@@ -195,7 +210,7 @@ export function startCloudSync() {
   addEventListener('online', () => void syncNow())
   onChange((e) => {
     // A merge from our own round announces 'all'; do not answer it with another round.
-    if (e.scope === 'feeds' || e.scope === 'weights' || (e.scope === 'all' && !cloud.syncing)) soon()
+    if (SYNCED_SCOPES.includes(e.scope) || (e.scope === 'all' && !cloud.syncing)) soon()
   })
   void syncNow()
 }
