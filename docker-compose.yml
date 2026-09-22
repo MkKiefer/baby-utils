@@ -20,11 +20,12 @@ services:
     # Health check comes from the image (wget http://127.0.0.1:8080/healthz).
     labels:
       - traefik.enable=true
-      - traefik.docker.network=proxy
-      - traefik.http.routers.baby-utils-web.rule=Host(`baby.${DOMAIN}`)
+      # Catch-all for the host -> the built SPA (nginx serves the SPA fallback).
+      - traefik.http.routers.baby-utils.rule=Host(`baby-utils.${DOMAIN}`)
       - traefik.http.routers.baby-utils-web.entrypoints=websecure
+      - traefik.http.routers.baby-utils-web.priority=1
       - traefik.http.routers.baby-utils-web.service=baby-utils-web
-      - traefik.http.services.baby-utils-web.loadbalancer.server.port=8080
+      - traefik.http.services.baby-utils-web.loadbalancer.server.port=80
 
 networks:
   proxy:
