@@ -25,7 +25,7 @@ services:
       - traefik.http.routers.baby-utils-web.entrypoints=websecure
       - traefik.http.routers.baby-utils-web.priority=1
       - traefik.http.routers.baby-utils-web.service=baby-utils-web
-      - traefik.http.services.baby-utils-web.loadbalancer.server.port=80
+      - traefik.http.services.baby-utils-web.loadbalancer.server.port=8080
 
 networks:
   proxy:
