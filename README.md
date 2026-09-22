@@ -77,12 +77,13 @@ src/
     sync.ts                BroadcastChannel change events (page ↔ SW ↔ tabs)
     cloud/                 optional relay sync: crypto.ts (E2E), api.ts, engine.ts (one
                            round, testable), service.ts (storage, scheduling, UI state)
-    merge.ts               union-by-id feed merge (backup files and relay sync)
+    merge.ts               union-by-id merge of feeds and weighings (backup files and relay sync)
     age.ts, time.ts, platform.ts, pwa.ts, backup.ts, wakeLock.ts, chime.ts, storage.ts
   apps/
     registry.ts            UI manifests of all sub-apps (home tiles, routes, tabs)
     providers.ts           SW-safe notification providers of all sub-apps
     feed/                  logic/ (pure + IndexedDB repo), views/, components/, store.ts
+    weight/                weight tracker: weighings in grams, kg or lb/oz display, chart
     debug/                 inspectors for every browser feature in use
   views/                   install gate, onboarding, home, settings, sub-app frame
   sw.ts                    precache, offline SPA, notification actions, periodic sync
@@ -92,7 +93,7 @@ server/                    sync relay (api): store.ts (groups, buffer), http.ts,
 ### Sync between phones
 
 Off by default; Settings → Sync between phones. One phone starts a group, the other joins by
-scanning its QR code (or pasting the code). From then on feeds sync automatically while the app
+scanning its QR code (or pasting the code). From then on feeds and weighings sync automatically while the app
 is open (every 30 s, on opening, and right after an edit).
 
 - **The group is a secret**: 256 random bits, generated on the phone. With HKDF-SHA256 each

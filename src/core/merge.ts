@@ -2,6 +2,8 @@ import { getDB, plain } from './db'
 import { emitChange } from './sync'
 import { readFeedRecords } from '@/apps/feed/logic/repo'
 import type { FeedEntry } from '@/apps/feed/logic/types'
+import { readWeightRecords } from '@/apps/weight/logic/repo'
+import type { WeightEntry } from '@/apps/weight/logic/types'
 import type { Backup } from './backup'
 
 /**
@@ -16,7 +18,8 @@ import type { Backup } from './backup'
  * The result is order-independent and idempotent: importing the same file twice, or each
  * device importing the other's file, converges on the same log.
  *
- * Only the `feeds` store is merged. Settings and the baby profile are single documents
+ * The same rules apply to every synced log — `feeds` and `weights` — through one generic
+ * core. Settings and the baby profile are single documents
  * with no sensible merge, so they stay device-local; `restoreBackup` still replaces a
  * whole device when that is what you want.
  *
@@ -34,7 +37,7 @@ export interface MergeStats {
   deleted: number
   /** Entries where this device already had the newer version. */
   unchanged: number
-  /** Records that were not usable feed entries. */
+  /** Records that were not usable entries. */
   skipped: number
 }
 
@@ -51,6 +54,16 @@ export const LAST_MERGE_KEY = 'merge.last'
 
 function emptyStats(): MergeStats {
   return { added: 0, updated: 0, deleted: 0, unchanged: 0, skipped: 0 }
+}
+
+function addStats(a: MergeStats, b: MergeStats): MergeStats {
+  return {
+    added: a.added + b.added,
+    updated: a.updated + b.updated,
+    deleted: a.deleted + b.deleted,
+    unchanged: a.unchanged + b.unchanged,
+    skipped: a.skipped + b.skipped,
+  }
 }
 
 /** Total number of entries a merge actually wrote. */
@@ -80,39 +93,80 @@ export function normalizeEntry(value: unknown): FeedEntry | null {
   return entry
 }
 
-/**
- * Content key used to break `updatedAt` ties. Two devices comparing the same pair pick
- * the same winner, which is what keeps them convergent without a shared clock.
- */
-function tieBreak(entry: FeedEntry): string {
-  return JSON.stringify([entry.at, entry.deletedAt ?? 0, entry.kind ?? '', entry.note ?? '', entry.source])
+/** What every synced log entry carries. */
+interface Syncable {
+  id: string
+  updatedAt: number
+  deletedAt?: number
 }
 
-/** The version of an entry that survives a merge. */
-export function pickNewer(a: FeedEntry, b: FeedEntry): FeedEntry {
+/** How to read and compare one kind of synced entry. */
+interface MergeKind<T extends Syncable> {
+  normalize(value: unknown): T | null
+  /**
+   * Content key used to break `updatedAt` ties. Two devices comparing the same pair pick
+   * the same winner, which is what keeps them convergent without a shared clock.
+   */
+  tieBreak(entry: T): string
+}
+
+const feedKind: MergeKind<FeedEntry> = {
+  normalize: normalizeEntry,
+  tieBreak: (e) => JSON.stringify([e.at, e.deletedAt ?? 0, e.kind ?? '', e.note ?? '', e.source]),
+}
+
+/** Like `normalizeEntry`, for weighings. */
+export function normalizeWeight(value: unknown): WeightEntry | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Partial<WeightEntry>
+  if (typeof raw.id !== 'string' || !raw.id) return null
+  if (typeof raw.at !== 'number' || !Number.isFinite(raw.at)) return null
+  if (typeof raw.grams !== 'number' || !Number.isFinite(raw.grams) || raw.grams <= 0) return null
+  const createdAt = typeof raw.createdAt === 'number' ? raw.createdAt : raw.at
+  const entry: WeightEntry = {
+    ...raw,
+    id: raw.id,
+    at: raw.at,
+    grams: raw.grams,
+    source: raw.source ?? 'import',
+    createdAt,
+    updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : createdAt,
+  }
+  if (typeof raw.deletedAt !== 'number') delete entry.deletedAt
+  return entry
+}
+
+const weightKind: MergeKind<WeightEntry> = {
+  normalize: normalizeWeight,
+  tieBreak: (e) => JSON.stringify([e.at, e.deletedAt ?? 0, e.grams, e.note ?? '', e.source]),
+}
+
+function newer<T extends Syncable>(kind: MergeKind<T>, a: T, b: T): T {
   if (a.updatedAt !== b.updatedAt) return a.updatedAt > b.updatedAt ? a : b
-  return tieBreak(a) >= tieBreak(b) ? a : b
+  return kind.tieBreak(a) >= kind.tieBreak(b) ? a : b
 }
 
-/** Two copies of an entry that would merge to the same thing, so writing is pointless. */
-function sameContent(a: FeedEntry, b: FeedEntry): boolean {
-  return a.updatedAt === b.updatedAt && tieBreak(a) === tieBreak(b)
+/** The version of a feed that survives a merge. */
+export function pickNewer(a: FeedEntry, b: FeedEntry): FeedEntry {
+  return newer(feedKind, a, b)
 }
 
-export interface MergeOutcome {
+export interface MergeOutcome<T = FeedEntry> {
   /** Entries to write locally; already the winning version. */
-  writes: FeedEntry[]
+  writes: T[]
   stats: MergeStats
 }
 
 /** Pure core of the merge: what `local` should take from `incoming`. */
-export function mergeFeedRecords(local: FeedEntry[], incoming: unknown[]): MergeOutcome {
+function mergeRecords<T extends Syncable>(kind: MergeKind<T>, local: T[], incoming: unknown[]): MergeOutcome<T> {
   const byId = new Map(local.map((e) => [e.id, e]))
-  const writes: FeedEntry[] = []
+  const writes: T[] = []
   const stats = emptyStats()
+  // Two copies of an entry that would merge to the same thing, so writing is pointless.
+  const sameContent = (a: T, b: T) => a.updatedAt === b.updatedAt && kind.tieBreak(a) === kind.tieBreak(b)
 
   for (const raw of incoming) {
-    const entry = normalizeEntry(raw)
+    const entry = kind.normalize(raw)
     if (!entry) {
       stats.skipped++
       continue
@@ -127,7 +181,7 @@ export function mergeFeedRecords(local: FeedEntry[], incoming: unknown[]): Merge
       else stats.added++
       continue
     }
-    const winner = pickNewer(entry, mine)
+    const winner = newer(kind, entry, mine)
     // Identity alone is not enough: re-merging the same file yields equal-but-distinct
     // objects, and rewriting those would make the merge non-idempotent.
     if (winner === mine || sameContent(winner, mine)) {
@@ -144,32 +198,50 @@ export function mergeFeedRecords(local: FeedEntry[], incoming: unknown[]): Merge
   return { writes, stats }
 }
 
-/** Reads the feed records out of a backup, tolerating either dump shape. */
-function incomingFeeds(backup: Backup): unknown[] {
-  const dump = backup.stores.feeds
+export function mergeFeedRecords(local: FeedEntry[], incoming: unknown[]): MergeOutcome<FeedEntry> {
+  return mergeRecords(feedKind, local, incoming)
+}
+
+export function mergeWeightRecords(local: WeightEntry[], incoming: unknown[]): MergeOutcome<WeightEntry> {
+  return mergeRecords(weightKind, local, incoming)
+}
+
+/** Records from another device, per synced store. Unknown shapes are skipped, not trusted. */
+export interface IncomingRecords {
+  feeds: unknown[]
+  weights: unknown[]
+}
+
+/** Reads one store's records out of a backup, tolerating either dump shape. */
+function fromBackup(backup: Backup, name: 'feeds' | 'weights'): unknown[] {
+  const dump = backup.stores[name]
   if (!dump) return []
   return dump.keyed ? dump.records.map((r) => (r as { value: unknown }).value) : dump.records
 }
 
-/** Merges a backup's feed log into this device. Leaves settings and profile untouched. */
+/** Merges a backup's feeds and weighings into this device. Leaves settings and profile untouched. */
 export function mergeBackup(backup: Backup): Promise<MergeStats> {
-  return mergeFeeds(incomingFeeds(backup), backup.exportedAt, 'file')
+  return mergeIncoming({ feeds: fromBackup(backup, 'feeds'), weights: fromBackup(backup, 'weights') }, backup.exportedAt, 'file')
 }
 
-/** Merges feed records from another device, however they arrived. */
-export async function mergeFeeds(incoming: unknown[], from: number, via: LastMerge['via']): Promise<MergeStats> {
+/** Merges records from another device, however they arrived. Stats cover all stores. */
+export async function mergeIncoming(incoming: IncomingRecords, from: number, via: LastMerge['via']): Promise<MergeStats> {
   const db = await getDB()
-  const { writes, stats } = mergeFeedRecords(await readFeedRecords(db), incoming)
+  const [localFeeds, localWeights] = await Promise.all([readFeedRecords(db), readWeightRecords(db)])
+  const feeds = mergeFeedRecords(localFeeds, incoming.feeds)
+  const weights = mergeWeightRecords(localWeights, incoming.weights)
 
-  if (writes.length) {
-    const tx = db.transaction('feeds', 'readwrite')
-    for (const entry of writes) await tx.store.put(plain(entry))
+  if (feeds.writes.length || weights.writes.length) {
+    const tx = db.transaction(['feeds', 'weights'], 'readwrite')
+    for (const entry of feeds.writes) await tx.objectStore('feeds').put(plain(entry))
+    for (const entry of weights.writes) await tx.objectStore('weights').put(plain(entry))
     await tx.done
   }
 
+  const stats = addStats(feeds.stats, weights.stats)
   const last: LastMerge = { ...stats, at: Date.now(), from, via }
   await db.put('kv', plain(last), LAST_MERGE_KEY)
-  // 'all' rather than 'feeds': the feed store only reloads on a foreign or global change.
+  // 'all' rather than a store scope: stores only reload on a foreign or global change.
   emitChange('all')
   return stats
 }

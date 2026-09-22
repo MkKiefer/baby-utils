@@ -40,6 +40,10 @@ export const formatClock = (ms: number) => clockFmt.format(ms)
 export const formatDate = (d: Date | number) => dateFmt.format(d)
 export const formatDateTime = (ms: number) => dateTimeFmt.format(ms)
 
+const shortDateFmt = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' })
+/** "22 Sep" — for tight spaces where the year is obvious. */
+export const formatShortDate = (ms: number) => shortDateFmt.format(ms)
+
 export function startOfDay(ms: number): number {
   const d = new Date(ms)
   d.setHours(0, 0, 0, 0)

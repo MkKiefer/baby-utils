@@ -3,7 +3,7 @@
  * `emitChange` informs local listeners immediately and every other context through a
  * BroadcastChannel. Works in window and worker scopes.
  */
-export type ChangeScope = 'profile' | 'feeds' | 'feed.settings' | 'notifications' | 'all'
+export type ChangeScope = 'profile' | 'feeds' | 'feed.settings' | 'weights' | 'weight.settings' | 'notifications' | 'all'
 
 export interface ChangeMessage {
   type: 'changed'

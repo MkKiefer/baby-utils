@@ -1,12 +1,14 @@
 import type { FeedEntry } from '@/apps/feed/logic/types'
-import type { MergeStats } from '../merge'
+import type { WeightEntry } from '@/apps/weight/logic/types'
+import type { IncomingRecords, MergeStats } from '../merge'
 import type { RelayClient } from './api'
 import { decryptMessage, encryptMessage, newMemberId, type GroupKeys } from './crypto'
 
 /**
  * One relay sync round, free of DOM and storage so it can be tested against the real relay.
  *
- * Every device remembers which version (`updatedAt`) of each feed the group already has —
+ * Every device remembers which version (`updatedAt`) of each synced entry (feeds and
+ * weighings) the group already has —
  * because this device sent it, or because it arrived from the group. A round then:
  *
  *   1. joins the group (a heartbeat; also tells us if the relay had dropped us),
@@ -42,7 +44,7 @@ export interface RoundResult {
 }
 
 export interface CloudState {
-  /** Feed id → version the group already has. */
+  /** Entry key (see `knownKey`) → version the group already has. */
   known: Record<string, number>
   /** The other members at the end of the last round. */
   members: string[]
@@ -60,13 +62,34 @@ export interface SyncPayload {
   label: string
   sentAt: number
   feeds: FeedEntry[]
+  /** Added with the weight tracker; missing from older app versions, which ignore it. */
+  weights?: WeightEntry[]
 }
+
+/** Every synced record on a device, tombstones included. */
+export interface SyncRecords {
+  feeds: FeedEntry[]
+  weights: WeightEntry[]
+}
+
+export type SyncKind = keyof SyncRecords
 
 export interface Device {
   relay: RelayClient
-  readRecords(): Promise<FeedEntry[]>
-  merge(feeds: unknown[], from: number): Promise<MergeStats>
+  readRecords(): Promise<SyncRecords>
+  merge(incoming: IncomingRecords, from: number): Promise<MergeStats>
   now?: () => number
+}
+
+const KINDS: SyncKind[] = ['feeds', 'weights']
+
+/** Feed ids stay unprefixed, so the `known` map of devices from before weights still applies. */
+export function knownKey(kind: SyncKind, id: string): string {
+  return kind === 'feeds' ? id : `weight:${id}`
+}
+
+export function recordCount(records: SyncRecords): number {
+  return records.feeds.length + records.weights.length
 }
 
 /** Entries per message; a year of feeds fits a handful of messages well below the relay cap. */
@@ -82,15 +105,31 @@ function isPayload(value: unknown): value is SyncPayload {
 }
 
 /** Entries whose current version the group has not seen. */
-export function pendingEntries(records: FeedEntry[], known: Record<string, number>): FeedEntry[] {
-  return records.filter((e) => known[e.id] !== e.updatedAt)
+export function pendingEntries(records: SyncRecords, known: Record<string, number>): SyncRecords {
+  return {
+    feeds: records.feeds.filter((e) => known[knownKey('feeds', e.id)] !== e.updatedAt),
+    weights: records.weights.filter((e) => known[knownKey('weights', e.id)] !== e.updatedAt),
+  }
 }
 
-async function send(dev: Device, keys: GroupKeys, config: CloudConfig, feeds: FeedEntry[], to?: string[]) {
+function markKnown(state: CloudState, records: SyncRecords) {
+  for (const kind of KINDS) for (const e of records[kind]) state.known[knownKey(kind, e.id)] = e.updatedAt
+}
+
+async function send(dev: Device, keys: GroupKeys, config: CloudConfig, records: SyncRecords, to?: string[]) {
   const now = dev.now?.() ?? Date.now()
+  // Chunk across both kinds, so a message never exceeds CHUNK entries in total.
+  const items = KINDS.flatMap((kind) => records[kind].map((entry) => ({ kind, entry })))
   let delivered = false
-  for (let i = 0; i === 0 || i < feeds.length; i += CHUNK) {
-    const payload: SyncPayload = { v: 1, label: config.label, sentAt: now, feeds: feeds.slice(i, i + CHUNK) }
+  for (let i = 0; i === 0 || i < items.length; i += CHUNK) {
+    const slice = items.slice(i, i + CHUNK)
+    const payload: SyncPayload = {
+      v: 1,
+      label: config.label,
+      sentAt: now,
+      feeds: slice.filter((x) => x.kind === 'feeds').map((x) => x.entry as FeedEntry),
+      weights: slice.filter((x) => x.kind === 'weights').map((x) => x.entry as WeightEntry),
+    }
     const body = await encryptMessage(keys, config.memberId, payload)
     if ((await dev.relay.post(keys.token, config.memberId, body, to)) !== null) delivered = true
   }
@@ -125,13 +164,14 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
 
   // 2. Receive.
   const { messages, members } = await relay.fetch(g, config.memberId)
-  const incoming: FeedEntry[] = []
+  const incoming = { feeds: [] as FeedEntry[], weights: [] as WeightEntry[] }
   let latest = 0
   for (const msg of messages) {
     try {
       const payload = await decryptMessage(keys, msg.from, msg.body)
       if (!isPayload(payload)) throw new Error('bad payload')
-      incoming.push(...payload.feeds)
+      incoming.feeds.push(...payload.feeds)
+      if (Array.isArray(payload.weights)) incoming.weights.push(...payload.weights)
       if (typeof payload.label === 'string') state.labels[msg.from] = payload.label.slice(0, 40)
       latest = Math.max(latest, payload.sentAt)
       result.received++
@@ -139,27 +179,30 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
       result.rejected++
     }
   }
-  if (incoming.length) result.merged = await dev.merge(incoming, latest)
+  if (recordCount(incoming)) result.merged = await dev.merge(incoming, latest)
   // Rejected ones too: they will never decrypt, and would otherwise be held forever.
   if (messages.length) await relay.ack(g, config.memberId, messages.map((m) => m.id))
 
   // What arrived and survived the merge is known to the group already.
   const records = await dev.readRecords()
-  const byId = new Map(records.map((e) => [e.id, e]))
-  for (const e of incoming) {
-    if (e && byId.get(e.id)?.updatedAt === e.updatedAt) state.known[e.id] = e.updatedAt
+  for (const kind of KINDS) {
+    const byId = new Map<string, { updatedAt: number }>(records[kind].map((e) => [e.id, e]))
+    for (const e of incoming[kind]) {
+      if (e && byId.get(e.id)?.updatedAt === e.updatedAt) state.known[knownKey(kind, e.id)] = e.updatedAt
+    }
   }
 
   // 3. Send changes to everyone (on a fresh join also an empty hello, so others learn our name).
   const others = members.map((m) => m.id).filter((id) => id !== config.memberId)
   const newcomers = others.filter((id) => !state.members.includes(id))
   const delta = pendingEntries(records, state.known)
+  const deltaCount = recordCount(delta)
   let everyoneHasAll = false
-  if (others.length && (delta.length || created)) {
+  if (others.length && (deltaCount || created)) {
     if (await send(dev, keys, config, delta)) {
-      for (const e of delta) state.known[e.id] = e.updatedAt
-      result.sent = delta.length
-      everyoneHasAll = delta.length === records.length
+      markKnown(state, delta)
+      result.sent = deltaCount
+      everyoneHasAll = deltaCount === recordCount(records)
     }
   }
 

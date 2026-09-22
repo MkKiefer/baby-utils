@@ -1,9 +1,10 @@
 import { reactive } from 'vue'
 import { getDB } from '../db'
-import { mergeFeeds } from '../merge'
+import { mergeIncoming } from '../merge'
 import { onChange } from '../sync'
 import { detectPlatform } from '../platform'
 import { readFeedRecords } from '@/apps/feed/logic/repo'
+import { readWeightRecords } from '@/apps/weight/logic/repo'
 import { relayClient, RelayError } from './api'
 import { deriveGroup, newGroupSecret, newMemberId, type GroupKeys } from './crypto'
 import { emptyState, syncRound, type CloudConfig, type CloudState, type RoundResult } from './engine'
@@ -99,8 +100,12 @@ export function syncNow(): Promise<void> {
           const round = await syncRound(
             {
               relay,
-              readRecords: async () => readFeedRecords(await getDB()),
-              merge: (feeds, from) => mergeFeeds(feeds, from, 'cloud'),
+              readRecords: async () => {
+                const db = await getDB()
+                const [feeds, weights] = await Promise.all([readFeedRecords(db), readWeightRecords(db)])
+                return { feeds, weights }
+              },
+              merge: (incoming, from) => mergeIncoming(incoming, from, 'cloud'),
             },
             await groupKeys(config.secret),
             config,
@@ -190,7 +195,7 @@ export function startCloudSync() {
   addEventListener('online', () => void syncNow())
   onChange((e) => {
     // A merge from our own round announces 'all'; do not answer it with another round.
-    if (e.scope === 'feeds' || (e.scope === 'all' && !cloud.syncing)) soon()
+    if (e.scope === 'feeds' || e.scope === 'weights' || (e.scope === 'all' && !cloud.syncing)) soon()
   })
   void syncNow()
 }

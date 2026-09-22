@@ -3,8 +3,9 @@ import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createHandler, groupIdFor, PREFIX } from '../../../server/http.ts'
 import { SyncStore } from '../../../server/store.ts'
-import { mergeFeedRecords } from '../merge'
+import { mergeFeedRecords, mergeWeightRecords } from '../merge'
 import type { FeedEntry } from '@/apps/feed/logic/types'
+import type { WeightEntry } from '@/apps/weight/logic/types'
 import { relayClient, type RelayClient } from './api'
 import {
   decryptMessage,
@@ -71,8 +72,13 @@ function feed(id: string, at: number, extra: Partial<FeedEntry> = {}): FeedEntry
   return { id, at, source: 'app', createdAt: at, updatedAt: at, plan: { baseMin: 180, offsetMin: 0 }, ...extra }
 }
 
+function weighing(id: string, at: number, grams: number, extra: Partial<WeightEntry> = {}): WeightEntry {
+  return { id, at, grams, source: 'app', createdAt: at, updatedAt: at, ...extra }
+}
+
 class Phone {
   records = new Map<string, FeedEntry>()
+  weights = new Map<string, WeightEntry>()
   state: CloudState = emptyState()
   config: CloudConfig
   device: Device
@@ -86,11 +92,13 @@ class Phone {
     this.config = { secret, memberId: newMemberId(), label, enabled: true, createdAt: 0 }
     this.device = {
       relay,
-      readRecords: async () => [...this.records.values()],
+      readRecords: async () => ({ feeds: [...this.records.values()], weights: [...this.weights.values()] }),
       merge: async (incoming) => {
-        const { writes, stats } = mergeFeedRecords([...this.records.values()], incoming)
-        for (const e of writes) this.records.set(e.id, e)
-        return stats
+        const feeds = mergeFeedRecords([...this.records.values()], incoming.feeds)
+        for (const e of feeds.writes) this.records.set(e.id, e)
+        const weights = mergeWeightRecords([...this.weights.values()], incoming.weights)
+        for (const e of weights.writes) this.weights.set(e.id, e)
+        return { ...feeds.stats, added: feeds.stats.added + weights.stats.added }
       },
     }
   }
@@ -168,6 +176,48 @@ describe('relay sync', () => {
     await b.sync()
     await c.sync()
     expect(store.state.groups[keys.groupId]!.messages).toEqual([])
+  })
+
+  it('syncs weighings alongside feeds, edits and deletes included', async () => {
+    const { phones } = await group('A', 'B')
+    const [a, b] = phones as [Phone, Phone]
+    a.add(feed('f1', 1000))
+    a.weights.set('w1', weighing('w1', 1000, 3450))
+    await a.sync()
+    await b.sync()
+    await a.sync()
+    await b.sync()
+    expect(b.weights.get('w1')?.grams).toBe(3450)
+    expect(b.live()).toEqual(['f1'])
+
+    b.weights.set('w1', weighing('w1', 1000, 3405, { updatedAt: 5000 }))
+    b.weights.set('w2', weighing('w2', 9000, 3500))
+    await b.sync()
+    await a.sync()
+    expect(a.weights.get('w1')?.grams).toBe(3405)
+    expect(a.weights.get('w2')?.grams).toBe(3500)
+
+    a.weights.set('w2', weighing('w2', 9000, 3500, { updatedAt: 9500, deletedAt: 9500 }))
+    await a.sync()
+    await b.sync()
+    expect(b.weights.get('w2')?.deletedAt).toBe(9500)
+    // Everything known: nothing left to send on either side.
+    expect((await a.sync()).sent).toBe(0)
+    expect((await b.sync()).sent).toBe(0)
+  })
+
+  it('accepts messages from app versions that predate weights', async () => {
+    const { keys, phones } = await group('A', 'B')
+    const [a] = phones as [Phone, Phone]
+    await a.sync()
+    const old = newMemberId()
+    await relay.join(keys.token, old)
+    await a.sync()
+    const body = await encryptMessage(keys, old, { v: 1, label: 'old', sentAt: 1, feeds: [feed('o1', 1)] })
+    await relay.post(keys.token, old, body)
+    const round = await a.sync()
+    expect(round.rejected).toBe(0)
+    expect(a.live()).toEqual(['o1'])
   })
 
   it('buffers while a phone is away', async () => {

@@ -145,7 +145,7 @@ async function leave() {
         <div class="callout info">
           <Lock :size="20" />
           <p>
-            Keep feeds in sync between your phones, automatically. Everything is <strong>encrypted on the phone</strong>
+            Keep feeds and weighings in sync between your phones, automatically. Everything is <strong>encrypted on the phone</strong>
             with a key only your phones share — the sync server just passes sealed messages along and cannot read them.
             Settings stay on each phone.
           </p>
@@ -220,7 +220,7 @@ async function leave() {
           <div class="card qr-card"><QrCode :value="invite" /></div>
           <div class="callout warn">
             <p>
-              This code is the key to your data. Anyone who has it can join and read your feeds. Scan it in person; if you
+              This code is the key to your data. Anyone who has it can join and read your data. Scan it in person; if you
               have to send it, use a private chat and delete the message afterwards.
             </p>
           </div>
@@ -244,7 +244,7 @@ async function leave() {
           </p>
         </div>
         <ConfirmButton label="Leave sync group" confirm-label="Tap again to leave" class="block" @confirm="leave" />
-        <p class="tiny faint hint">Your feeds stay on this phone when you leave.</p>
+        <p class="tiny faint hint">Your data stays on this phone when you leave.</p>
       </template>
     </div>
   </div>

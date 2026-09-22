@@ -146,6 +146,17 @@ The app explains this in the feed settings.
   options, explanation of how reminders work.
 * **Night mode**: full-screen dim view with wake lock, chime and vibration.
 
+## 5b. Weight tracker (`src/apps/weight`)
+
+* `weights` store (DB v3): `{ id, at, grams, note?, source, createdAt, updatedAt, deletedAt? }`.
+  Always grams; `kv['weight.settings'].unit` (`kg` | `lb`) only changes display and input.
+* Syncs like feeds: union by id, `updatedAt` LWW, tombstones (`core/merge.ts`); travels in
+  the same encrypted relay payload as an optional `weights` array (older apps ignore it).
+* Stats (`logic/stats.ts`, pure): latest, change since previous, grams/day over a 3–14 day
+  window, birth weight (first weighing within 2 days of birth), newborn dip + regain date.
+* UI: overview (facts, dip/regain callout, SVG chart with birth line and hover tooltip, recent),
+  history (change per weighing, age), settings (unit), home tile, Debug section.
+
 ## 6. Debug sub-app (`src/apps/debug`)
 Rule: *every browser feature the app uses gets an inspector here.*
 * IndexedDB: databases → stores → records (JSON), counts, delete record, clear store.

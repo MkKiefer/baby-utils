@@ -2,12 +2,13 @@
 import { onMounted, ref } from 'vue'
 import { SYNC_API } from '@/core/cloud/api'
 import { decryptMessage, encryptMessage, newMemberId } from '@/core/cloud/crypto'
-import { pendingEntries } from '@/core/cloud/engine'
+import { pendingEntries, recordCount } from '@/core/cloud/engine'
 import { cloud, cloudLog, groupKeys, POLL_MS, relayHealth } from '@/core/cloud/service'
 import { cameraSupported, nativeQrSupported, scannerState } from '@/core/scanner'
 import { getDB } from '@/core/db'
 import { formatDateTime } from '@/core/time'
 import { readFeedRecords } from '@/apps/feed/logic/repo'
+import { readWeightRecords } from '@/apps/weight/logic/repo'
 import JsonView from '../components/JsonView.vue'
 
 /** Relay sync: config, derived ids, what is pending, the relay's health and a crypto self-test. */
@@ -17,9 +18,15 @@ const health = ref('')
 const selfTest = ref('')
 const revealSecret = ref(false)
 
+async function readRecords() {
+  const db = await getDB()
+  const [feeds, weights] = await Promise.all([readFeedRecords(db), readWeightRecords(db)])
+  return { feeds, weights }
+}
+
 async function refresh() {
   const c = cloud.config
-  const records = await readFeedRecords(await getDB())
+  const records = await readRecords()
   info.value = {
     API: SYNC_API,
     'Web Crypto (subtle)': globalThis.crypto?.subtle ? 'yes' : 'no',
@@ -37,8 +44,11 @@ async function refresh() {
       'Joined at': formatDateTime(c.createdAt),
       'Last sync': cloud.state.lastSyncAt ? formatDateTime(cloud.state.lastSyncAt) : 'never',
       'Last error': cloud.state.lastError ?? '—',
-      'Entries known to the group': `${Object.keys(cloud.state.known).length} of ${records.length}`,
-      'Pending to send': String(pendingEntries(records, cloud.state.known).length),
+      'Entries known to the group': `${Object.keys(cloud.state.known).length} of ${recordCount(records)}`,
+      'Pending to send': (() => {
+        const p = pendingEntries(records, cloud.state.known)
+        return `${p.feeds.length} feeds, ${p.weights.length} weighings`
+      })(),
     })
   }
   log.value = [...cloudLog]
@@ -53,23 +63,23 @@ async function checkHealth() {
   }
 }
 
-/** Encrypts and decrypts the whole feed log with the group key (or a throwaway one). */
+/** Encrypts and decrypts every synced record with the group key (or a throwaway one). */
 async function runSelfTest() {
   const t0 = performance.now()
   try {
     const keys = await groupKeys(cloud.config?.secret ?? 'A'.repeat(43))
     const from = newMemberId()
-    const feeds = await readFeedRecords(await getDB())
-    const body = await encryptMessage(keys, from, { v: 1, feeds })
-    const back = (await decryptMessage(keys, from, body)) as { feeds: unknown[] }
+    const { feeds, weights } = await readRecords()
+    const body = await encryptMessage(keys, from, { v: 1, feeds, weights })
+    const back = (await decryptMessage(keys, from, body)) as { feeds: unknown[]; weights: unknown[] }
     let tamperRejected = false
     try {
       await decryptMessage(keys, newMemberId(), body)
     } catch {
       tamperRejected = true
     }
-    const ok = back.feeds.length === feeds.length && tamperRejected
-    selfTest.value = `${ok ? 'OK' : 'MISMATCH'} — ${feeds.length} feeds → ${body.length} chars, wrong sender ${
+    const ok = back.feeds.length === feeds.length && back.weights.length === weights.length && tamperRejected
+    selfTest.value = `${ok ? 'OK' : 'MISMATCH'} — ${feeds.length} feeds + ${weights.length} weighings → ${body.length} chars, wrong sender ${
       tamperRejected ? 'rejected' : 'ACCEPTED'
     }, ${Math.round(performance.now() - t0)} ms`
   } catch (e) {

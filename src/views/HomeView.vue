@@ -73,7 +73,7 @@ const utilityApps = computed(() => subApps.filter((a) => a.utility))
         <span class="icon"><Sparkles :size="22" /></span>
         <span class="text">
           <strong>More soon</strong>
-          <span class="small muted">Sleep, diapers, growth…</span>
+          <span class="small muted">Sleep, diapers…</span>
         </span>
       </div>
     </div>

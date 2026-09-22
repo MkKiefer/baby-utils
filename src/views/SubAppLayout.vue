@@ -28,6 +28,9 @@ const subtitle = computed(() => (profile.age ? `${profile.displayName} · ${prof
 
 <style scoped>
 .subapp {
+  /* Derived tints resolve where they are declared, so re-derive them from this app's accent. */
+  --accent-soft: color-mix(in oklab, var(--accent) 16%, transparent);
+  --accent-mid: color-mix(in oklab, var(--accent) 42%, var(--surface));
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
