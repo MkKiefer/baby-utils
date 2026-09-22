@@ -90,102 +90,105 @@ onMounted(refreshStorage)
 </script>
 
 <template>
-  <AppBar title="Settings" back="/" />
-  <div class="page">
-    <h2 class="section-title">Baby</h2>
-    <div class="card stack">
-      <label class="field">
-        <span>Name</span>
-        <input v-model="name" class="input" type="text" maxlength="40" placeholder="Baby" @change="saveProfile" />
-      </label>
-      <div class="two">
+  <div>
+    <!-- Single root required: App.vue's <Transition mode="out-in"> can't leave a multi-root view (blank screen). -->
+    <AppBar title="Settings" back="/" />
+    <div class="page">
+      <h2 class="section-title">Baby</h2>
+      <div class="card stack">
         <label class="field">
-          <span>Birth date</span>
-          <input v-model="birthDate" class="input" type="date" :max="today" @change="saveProfile" />
+          <span>Name</span>
+          <input v-model="name" class="input" type="text" maxlength="40" placeholder="Baby" @change="saveProfile" />
         </label>
-        <label class="field">
-          <span>Time</span>
-          <input v-model="birthTime" class="input" type="time" @change="saveProfile" />
-        </label>
-      </div>
-    </div>
-
-    <h2 class="section-title">Appearance</h2>
-    <SegmentedControl
-      v-model="theme"
-      label="Theme"
-      :options="[
-        { value: 'system', label: 'System' },
-        { value: 'light', label: 'Light' },
-        { value: 'dark', label: 'Dark' },
-      ]"
-    />
-
-    <h2 class="section-title">Notifications</h2>
-    <div class="list">
-      <div class="list-item">
-        <div class="grow">
-          <strong>Permission</strong>
-          <p class="small muted">{{ notificationPermission }}</p>
+        <div class="two">
+          <label class="field">
+            <span>Birth date</span>
+            <input v-model="birthDate" class="input" type="date" :max="today" @change="saveProfile" />
+          </label>
+          <label class="field">
+            <span>Time</span>
+            <input v-model="birthTime" class="input" type="time" @change="saveProfile" />
+          </label>
         </div>
-        <button v-if="notificationPermission === 'default'" class="btn sm primary" @click="requestNotificationPermission">
-          Allow
-        </button>
       </div>
-      <p v-if="notificationPermission === 'denied'" class="list-item small muted">
-        Blocked. Re-enable notifications for Baby Utils in your system or browser settings.
+
+      <h2 class="section-title">Appearance</h2>
+      <SegmentedControl
+        v-model="theme"
+        label="Theme"
+        :options="[
+          { value: 'system', label: 'System' },
+          { value: 'light', label: 'Light' },
+          { value: 'dark', label: 'Dark' },
+        ]"
+      />
+
+      <h2 class="section-title">Notifications</h2>
+      <div class="list">
+        <div class="list-item">
+          <div class="grow">
+            <strong>Permission</strong>
+            <p class="small muted">{{ notificationPermission }}</p>
+          </div>
+          <button v-if="notificationPermission === 'default'" class="btn sm primary" @click="requestNotificationPermission">
+            Allow
+          </button>
+        </div>
+        <p v-if="notificationPermission === 'denied'" class="list-item small muted">
+          Blocked. Re-enable notifications for Baby Utils in your system or browser settings.
+        </p>
+      </div>
+
+      <h2 class="section-title">Data &amp; privacy</h2>
+      <div class="list">
+        <div class="list-item">
+          <div class="grow">
+            <strong>Protected storage</strong>
+            <p class="small muted">
+              {{
+                storageState.persisted
+                  ? 'On — the browser will not clear this data on its own.'
+                  : 'Off — the browser may clear data when storage runs low.'
+              }}
+              Using {{ formatBytes(storageState.usage) }}.
+            </p>
+          </div>
+          <button v-if="!storageState.persisted && storageState.supported" class="btn sm" @click="requestPersistence">
+            Protect
+          </button>
+        </div>
+        <button class="list-item" @click="doExport">
+          <Download :size="20" />
+          <span class="grow"><strong>Export backup</strong><br /><span class="small muted">JSON file with all data</span></span>
+        </button>
+        <button class="list-item" @click="pickFile('merge')">
+          <Smartphone :size="20" />
+          <span class="grow"
+            ><strong>Merge from another device</strong><br /><span class="small muted"
+              >Adds their feeds to yours · safe to repeat</span
+            ></span
+          >
+        </button>
+        <button class="list-item" @click="pickFile('replace')">
+          <Upload :size="20" />
+          <span class="grow"><strong>Restore backup</strong><br /><span class="small muted">Replaces all current data</span></span>
+        </button>
+        <input ref="fileInput" type="file" accept="application/json,.json" hidden @change="doImport" />
+        <RouterLink to="/app/debug" class="list-item" style="text-decoration: none">
+          <Bug :size="20" />
+          <span class="grow"><strong>Debug</strong><br /><span class="small muted">Inspect everything stored on this device</span></span>
+          <ChevronRight :size="18" class="faint" />
+        </RouterLink>
+      </div>
+      <div style="margin-top: 16px">
+        <ConfirmButton label="Delete all data" confirm-label="Tap again — this cannot be undone" class="block" @confirm="wipe" />
+      </div>
+
+      <p class="tiny faint about">
+        Baby Utils {{ version }} · {{ installed ? 'installed app' : 'browser tab' }}<br />
+        Not medical advice. Always follow your midwife or paediatrician.
       </p>
     </div>
-
-    <h2 class="section-title">Data &amp; privacy</h2>
-    <div class="list">
-      <div class="list-item">
-        <div class="grow">
-          <strong>Protected storage</strong>
-          <p class="small muted">
-            {{
-              storageState.persisted
-                ? 'On — the browser will not clear this data on its own.'
-                : 'Off — the browser may clear data when storage runs low.'
-            }}
-            Using {{ formatBytes(storageState.usage) }}.
-          </p>
-        </div>
-        <button v-if="!storageState.persisted && storageState.supported" class="btn sm" @click="requestPersistence">
-          Protect
-        </button>
-      </div>
-      <button class="list-item" @click="doExport">
-        <Download :size="20" />
-        <span class="grow"><strong>Export backup</strong><br /><span class="small muted">JSON file with all data</span></span>
-      </button>
-      <button class="list-item" @click="pickFile('merge')">
-        <Smartphone :size="20" />
-        <span class="grow"
-          ><strong>Merge from another device</strong><br /><span class="small muted"
-            >Adds their feeds to yours · safe to repeat</span
-          ></span
-        >
-      </button>
-      <button class="list-item" @click="pickFile('replace')">
-        <Upload :size="20" />
-        <span class="grow"><strong>Restore backup</strong><br /><span class="small muted">Replaces all current data</span></span>
-      </button>
-      <input ref="fileInput" type="file" accept="application/json,.json" hidden @change="doImport" />
-      <RouterLink to="/app/debug" class="list-item" style="text-decoration: none">
-        <Bug :size="20" />
-        <span class="grow"><strong>Debug</strong><br /><span class="small muted">Inspect everything stored on this device</span></span>
-        <ChevronRight :size="18" class="faint" />
-      </RouterLink>
-    </div>
-    <div style="margin-top: 16px">
-      <ConfirmButton label="Delete all data" confirm-label="Tap again — this cannot be undone" class="block" @confirm="wipe" />
-    </div>
-
-    <p class="tiny faint about">
-      Baby Utils {{ version }} · {{ installed ? 'installed app' : 'browser tab' }}<br />
-      Not medical advice. Always follow your midwife or paediatrician.
-    </p>
   </div>
 </template>
 
