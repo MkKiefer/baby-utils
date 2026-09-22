@@ -12,7 +12,7 @@ function settings(patch: Partial<FeedSettings> = {}): FeedSettings {
 }
 
 function feed(at: number, baseMin = 150, i = 0): FeedEntry {
-  return { id: `f${i}-${at}`, at, source: 'app', createdAt: at, plan: { baseMin, offsetMin: 0 } }
+  return { id: `f${i}-${at}`, at, source: 'app', createdAt: at, updatedAt: at, plan: { baseMin, offsetMin: 0 } }
 }
 
 /** Feeds every `gaps[i]` minutes starting at T0. */

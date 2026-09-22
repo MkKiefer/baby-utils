@@ -8,6 +8,16 @@ export interface FeedEntry {
   note?: string
   source: 'app' | 'notification' | 'import'
   createdAt: number
+  /**
+   * Last local change (epoch ms). Merging a backup from another device keeps whichever
+   * version of an entry was edited last. See `core/merge.ts`.
+   */
+  updatedAt: number
+  /**
+   * Soft delete (epoch ms). Deleted entries are tombstoned rather than removed, so the
+   * deletion survives a merge instead of being resurrected by the other device.
+   */
+  deletedAt?: number
   /** Interval that applied *after* this feed, snapshotted when it was logged. */
   plan: { baseMin: number; offsetMin: number }
 }

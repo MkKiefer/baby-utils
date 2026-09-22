@@ -25,15 +25,29 @@ export async function writeFeedSettings(db: DB, settings: FeedSettings): Promise
   await db.put('kv', plain(settings), FEED_SETTINGS_KEY)
 }
 
+/** Drops tombstones: deleted entries stay in the store so merges can see the deletion. */
+function live(entries: FeedEntry[]): FeedEntry[] {
+  return entries.filter((e) => !e.deletedAt)
+}
+
 /** Feeds since `since` (ascending); always includes the latest feed even if older. */
 export async function readFeedsSince(db: DB, since: number): Promise<FeedEntry[]> {
-  const recent = await db.getAllFromIndex('feeds', 'byAt', IDBKeyRange.lowerBound(since))
+  const recent = live(await db.getAllFromIndex('feeds', 'byAt', IDBKeyRange.lowerBound(since)))
   if (recent.length) return recent
-  const cursor = await db.transaction('feeds').store.index('byAt').openCursor(null, 'prev')
-  return cursor ? [cursor.value] : []
+  let cursor = await db.transaction('feeds').store.index('byAt').openCursor(null, 'prev')
+  while (cursor) {
+    if (!cursor.value.deletedAt) return [cursor.value]
+    cursor = await cursor.continue()
+  }
+  return []
 }
 
 export async function readAllFeeds(db: DB): Promise<FeedEntry[]> {
+  return live(await db.getAllFromIndex('feeds', 'byAt'))
+}
+
+/** Every record, tombstones included: for merging, backup and the Debug app. */
+export async function readFeedRecords(db: DB): Promise<FeedEntry[]> {
   return db.getAllFromIndex('feeds', 'byAt')
 }
 
@@ -70,6 +84,7 @@ export async function addFeed(db: DB, input: NewFeed, now = Date.now()): Promise
     at: input.at,
     source: input.source,
     createdAt: now,
+    updatedAt: now,
     plan: { baseMin: 0, offsetMin: 0 },
     ...(input.kind ? { kind: input.kind } : {}),
     ...(input.note ? { note: input.note } : {}),
@@ -85,12 +100,28 @@ export async function addFeed(db: DB, input: NewFeed, now = Date.now()): Promise
   return entry
 }
 
-export async function putFeed(db: DB, entry: FeedEntry): Promise<void> {
-  await db.put('feeds', plain(entry))
+export async function putFeed(db: DB, entry: FeedEntry, now = Date.now()): Promise<FeedEntry> {
+  const next = plain({ ...entry, updatedAt: now })
+  await db.put('feeds', next)
+  return next
 }
 
-export async function deleteFeed(db: DB, id: string): Promise<void> {
-  await db.delete('feeds', id)
+/**
+ * Tombstones the entry instead of removing it. A hard delete would be undone by the next
+ * merge, because the other device still has the entry and would look like the newer copy.
+ */
+export async function deleteFeed(db: DB, id: string, now = Date.now()): Promise<void> {
+  const entry = await db.get('feeds', id)
+  if (!entry) return
+  await db.put('feeds', plain({ ...entry, deletedAt: now, updatedAt: now }))
+}
+
+/** Undo of `deleteFeed`: clears the tombstone and wins over it by being newer. */
+export async function restoreFeed(db: DB, entry: FeedEntry, now = Date.now()): Promise<FeedEntry> {
+  const { deletedAt: _deletedAt, ...rest } = entry
+  const next = plain({ ...rest, updatedAt: now })
+  await db.put('feeds', next)
+  return next
 }
 
 export const feedNotificationProvider: NotificationProvider = {

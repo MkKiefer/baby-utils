@@ -1,12 +1,25 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import JsonView from '@/apps/debug/components/JsonView.vue'
-import { formatClock, formatDuration, formatOffset } from '@/core/time'
+import { formatClock, formatDateTime, formatDuration, formatOffset } from '@/core/time'
+import { getDB } from '@/core/db'
+import { readLastMerge, type LastMerge } from '@/core/merge'
+import { readFeedRecords } from './logic/repo'
 import { useFeedStore } from './store'
 
 /** Feed timer internals: interval resolution, rhythm samples, reminder cycles. */
 const store = useFeedStore()
 void store.ensureLoaded()
+
+/** Tombstones are invisible to the store but decide what a merge does — show them. */
+const records = ref({ total: 0, deleted: 0 })
+const lastMerge = ref<LastMerge | null>(null)
+
+onMounted(async () => {
+  const all = await readFeedRecords(await getDB())
+  records.value = { total: all.length, deleted: all.filter((e) => e.deletedAt).length }
+  lastMerge.value = await readLastMerge()
+})
 
 const plan = computed(() => store.plan)
 const summary = computed(() => {
@@ -44,7 +57,16 @@ const summary = computed(() => {
       </tr>
       <tr>
         <th>Feeds in store</th>
-        <td>{{ store.feeds.length }}</td>
+        <td>{{ store.feeds.length }} live · {{ records.deleted }} tombstoned · {{ records.total }} records</td>
+      </tr>
+      <tr>
+        <th>Last merge</th>
+        <td>
+          <template v-if="lastMerge">
+            {{ formatDateTime(lastMerge.at) }} · from a backup of {{ formatDateTime(lastMerge.from) }}
+          </template>
+          <template v-else>never</template>
+        </td>
       </tr>
     </tbody>
   </table>
@@ -87,4 +109,6 @@ const summary = computed(() => {
   <JsonView :value="summary" />
   <strong class="small">Settings (kv: feed.settings)</strong>
   <JsonView :value="store.settings" />
+  <strong class="small">Last merge (kv: merge.last)</strong>
+  <JsonView :value="lastMerge" />
 </template>

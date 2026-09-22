@@ -1,5 +1,6 @@
 import { openDB, type IDBPDatabase } from 'idb'
 import { DB_NAME, DB_VERSION, STORES, type BabyDB } from './schema'
+import type { FeedEntry } from '@/apps/feed/logic/types'
 
 export type DB = IDBPDatabase<BabyDB>
 
@@ -7,7 +8,7 @@ let dbPromise: Promise<DB> | null = null
 
 export function getDB(): Promise<DB> {
   dbPromise ??= openDB<BabyDB>(DB_NAME, DB_VERSION, {
-    upgrade(db, _oldVersion, _newVersion, tx) {
+    async upgrade(db, oldVersion, _newVersion, tx) {
       // Loosely typed on purpose: declarations drive the schema.
       const raw = db as unknown as IDBDatabase
       for (const decl of STORES) {
@@ -16,6 +17,17 @@ export function getDB(): Promise<DB> {
           : raw.createObjectStore(decl.name, decl.keyPath ? { keyPath: decl.keyPath } : undefined)
         for (const idx of decl.indexes ?? []) {
           if (!store.indexNames.contains(idx.name)) store.createIndex(idx.name, idx.keyPath)
+        }
+      }
+      // v2 gave feeds an `updatedAt`; entries written by v1 fall back to when they were created.
+      if (oldVersion > 0 && oldVersion < 2) {
+        let cursor = await tx.objectStore('feeds').openCursor()
+        while (cursor) {
+          const entry = cursor.value as FeedEntry
+          if (typeof entry.updatedAt !== 'number') {
+            await cursor.update({ ...entry, updatedAt: entry.createdAt ?? entry.at })
+          }
+          cursor = await cursor.continue()
         }
       }
     },

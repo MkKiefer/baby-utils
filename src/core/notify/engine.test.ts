@@ -33,7 +33,7 @@ describe('processDue', () => {
     const db = await getDB()
     await Promise.all([db.clear('feeds'), db.clear('kv'), db.clear('notifLog')])
     await db.put('kv', { name: 'Test', birthDate: '2026-09-20', createdAt: T0 }, PROFILE_KEY)
-    await db.put('feeds', { id: 'f1', at: T0, source: 'app', createdAt: T0, plan: { baseMin: 150, offsetMin: 0 } })
+    await db.put('feeds', { id: 'f1', at: T0, source: 'app', createdAt: T0, updatedAt: T0, plan: { baseMin: 150, offsetMin: 0 } })
   })
 
   const opts = (show = vi.fn(async () => {})) => ({ via: 'page' as const, appVisible: false, canNotify: true, show })

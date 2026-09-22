@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import { Bug, ChevronRight, Download, Upload } from 'lucide-vue-next'
+import { Bug, ChevronRight, Download, Smartphone, Upload } from 'lucide-vue-next'
 import AppBar from '@/components/AppBar.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
 import ConfirmButton from '@/components/ConfirmButton.vue'
@@ -10,6 +10,7 @@ import { toIsoDate } from '@/core/age'
 import { notificationPermission, requestNotificationPermission } from '@/core/notify/permission'
 import { formatBytes, refreshStorage, requestPersistence, storageState } from '@/core/storage'
 import { exportBackupFile, parseBackup, restoreBackup, wipeAllData } from '@/core/backup'
+import { describeMerge, mergeBackup } from '@/core/merge'
 import { isStandalone } from '@/core/platform'
 import { toast } from '@/composables/useToast'
 import { useRouter } from 'vue-router'
@@ -48,6 +49,12 @@ const theme = ref<ThemePref>(themeState.pref)
 watch(theme, (t) => setTheme(t))
 
 const fileInput = ref<HTMLInputElement>()
+const importMode = ref<'merge' | 'replace'>('merge')
+
+function pickFile(mode: 'merge' | 'replace') {
+  importMode.value = mode
+  fileInput.value?.click()
+}
 
 async function doExport() {
   const result = await exportBackupFile()
@@ -59,8 +66,13 @@ async function doImport(e: Event) {
   if (!file) return
   try {
     const backup = parseBackup(await file.text())
-    await restoreBackup(backup)
-    toast(`Restored backup from ${new Date(backup.exportedAt).toLocaleString()}`, { tone: 'ok' })
+    if (importMode.value === 'merge') {
+      toast(describeMerge(await mergeBackup(backup)), { tone: 'ok' })
+    } else {
+      await restoreBackup(backup)
+      await profileStore.load()
+      toast(`Restored backup from ${new Date(backup.exportedAt).toLocaleString()}`, { tone: 'ok' })
+    }
   } catch (err) {
     toast(String((err as Error).message ?? err), { tone: 'warn' })
   } finally {
@@ -147,7 +159,15 @@ onMounted(refreshStorage)
         <Download :size="20" />
         <span class="grow"><strong>Export backup</strong><br /><span class="small muted">JSON file with all data</span></span>
       </button>
-      <button class="list-item" @click="fileInput?.click()">
+      <button class="list-item" @click="pickFile('merge')">
+        <Smartphone :size="20" />
+        <span class="grow"
+          ><strong>Merge from another device</strong><br /><span class="small muted"
+            >Adds their feeds to yours · safe to repeat</span
+          ></span
+        >
+      </button>
+      <button class="list-item" @click="pickFile('replace')">
         <Upload :size="20" />
         <span class="grow"><strong>Restore backup</strong><br /><span class="small muted">Replaces all current data</span></span>
       </button>

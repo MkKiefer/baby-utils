@@ -7,7 +7,16 @@ import { DAY } from '@/core/time'
 import { useNow } from '@/composables/useNow'
 import { useProfileStore } from '@/stores/profile'
 import { computeFeedPlan, sortFeeds } from './logic/plan'
-import { addFeed, deleteFeed, putFeed, readAllFeeds, readFeedSettings, writeFeedSettings, PLAN_HISTORY_MS } from './logic/repo'
+import {
+  addFeed,
+  deleteFeed,
+  putFeed,
+  readAllFeeds,
+  readFeedSettings,
+  restoreFeed,
+  writeFeedSettings,
+  PLAN_HISTORY_MS,
+} from './logic/repo'
 import { DEFAULT_FEED_SETTINGS, type FeedEntry, type FeedKind, type FeedSettings } from './logic/types'
 
 export const useFeedStore = defineStore('feed', () => {
@@ -64,8 +73,8 @@ export const useFeedStore = defineStore('feed', () => {
   }
 
   async function update(entry: FeedEntry) {
-    await putFeed(await getDB(), entry)
-    feeds.value = sortFeeds(feeds.value.map((f) => (f.id === entry.id ? entry : f)))
+    const saved = await putFeed(await getDB(), entry)
+    feeds.value = sortFeeds(feeds.value.map((f) => (f.id === saved.id ? saved : f)))
     emitChange('feeds')
   }
 
@@ -77,10 +86,10 @@ export const useFeedStore = defineStore('feed', () => {
     return entry
   }
 
-  /** Puts a deleted entry back (undo). */
+  /** Puts a deleted entry back (undo), clearing the tombstone `remove` left behind. */
   async function restore(entry: FeedEntry) {
-    await putFeed(await getDB(), entry)
-    feeds.value = sortFeeds([...feeds.value.filter((f) => f.id !== entry.id), entry])
+    const saved = await restoreFeed(await getDB(), entry)
+    feeds.value = sortFeeds([...feeds.value.filter((f) => f.id !== saved.id), saved])
     emitChange('feeds')
   }
 

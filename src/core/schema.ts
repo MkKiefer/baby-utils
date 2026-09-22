@@ -27,7 +27,9 @@ export interface StoreDecl {
 }
 
 export const DB_NAME = 'baby-utils'
-export const DB_VERSION = 1
+
+/** v2: `feeds` entries gained `updatedAt`/`deletedAt` so two devices can be merged. */
+export const DB_VERSION = 2
 
 export const STORES: StoreDecl[] = [
   { name: 'kv', owner: 'core' },
