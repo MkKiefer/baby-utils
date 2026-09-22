@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { BellOff, BellRing, ChevronRight, Moon, PauseCircle, Sun } from 'lucide-vue-next'
+import { BellOff, BellRing, ChevronRight, Moon, PauseCircle, Pencil, Sun } from 'lucide-vue-next'
 import { formatClock, formatDuration, formatOffset, formatSpan, formatDayLabel } from '@/core/time'
 import { notificationPermission, requestNotificationPermission } from '@/core/notify/permission'
 import { unlockAudio } from '@/core/chime'
@@ -10,11 +10,12 @@ import { useFeedActions } from '../useFeedActions'
 import FeedDial from '../components/FeedDial.vue'
 import KindPicker from '../components/KindPicker.vue'
 import FeedEarlierSheet from '../components/FeedEarlierSheet.vue'
-import { KIND_LABEL, type FeedKind } from '../logic/types'
+import FeedEditSheet from '../components/FeedEditSheet.vue'
+import { KIND_LABEL, type FeedEntry, type FeedKind } from '../logic/types'
 
 const store = useFeedStore()
 const router = useRouter()
-const { logFeed } = useFeedActions()
+const { logFeed, removeFeed, saveFeed } = useFeedActions()
 void store.ensureLoaded()
 
 const MODE_KEY = 'bu.feed.dialMode'
@@ -41,6 +42,13 @@ const busy = ref(false)
 const plan = computed(() => store.plan)
 const last = computed(() => plan.value.lastFeed)
 const recent = computed(() => [...store.feeds].reverse().slice(0, 3))
+
+const editing = ref<FeedEntry | null>(null)
+const editOpen = ref(false)
+function edit(f: FeedEntry) {
+  editing.value = f
+  editOpen.value = true
+}
 
 const intervalSource = computed(() => {
   const p = plan.value
@@ -158,19 +166,21 @@ function openNight() {
       <RouterLink to="/app/feed/history" class="btn sm ghost">History <ChevronRight :size="16" /></RouterLink>
     </div>
     <div v-if="recent.length" class="list">
-      <div v-for="f in recent" :key="f.id" class="list-item">
+      <button v-for="f in recent" :key="f.id" class="list-item" title="Edit feed" @click="edit(f)">
         <span class="dot" />
         <div class="grow">
           <strong class="num">{{ formatClock(f.at) }}</strong>
           <span class="muted small"> · {{ formatDayLabel(f.at, plan.now) }}</span>
         </div>
         <span v-if="f.kind" class="chip">{{ KIND_LABEL[f.kind] }}</span>
-      </div>
+        <Pencil :size="15" class="faint" aria-hidden="true" />
+      </button>
     </div>
     <p v-else class="muted small" style="padding: 0 6px">No feeds logged yet.</p>
   </div>
 
   <FeedEarlierSheet v-model="earlierOpen" :suggested="store.suggestedKind" :initial-kind="kind" @save="fedEarlier" />
+  <FeedEditSheet v-model="editOpen" :entry="editing" @save="saveFeed" @delete="(id) => removeFeed(id)" />
 </template>
 
 <style scoped>

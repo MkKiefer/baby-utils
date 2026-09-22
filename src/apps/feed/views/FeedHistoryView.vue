@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Bell, StickyNote } from 'lucide-vue-next'
+import { Bell, Pencil, StickyNote } from 'lucide-vue-next'
 import { DAY, formatClock, formatDayLabel, formatDuration, formatOffset, MINUTE, startOfDay } from '@/core/time'
 import { useFeedStore } from '../store'
 import { useFeedActions } from '../useFeedActions'
@@ -10,7 +10,7 @@ import { GAP_RATIO } from '../logic/rhythm'
 import { KIND_LABEL, type FeedEntry } from '../logic/types'
 
 const store = useFeedStore()
-const { removeFeed } = useFeedActions()
+const { removeFeed, saveFeed } = useFeedActions()
 void store.ensureLoaded()
 
 const now = computed(() => store.plan.now)
@@ -99,7 +99,7 @@ function edit(f: FeedEntry) {
     <template v-for="g in groups" :key="g.day">
       <h2 class="section-title">{{ formatDayLabel(g.day, now) }} · {{ g.items.length }}</h2>
       <div class="list">
-        <button v-for="r in g.items" :key="r.f.id" class="list-item" @click="edit(r.f)">
+        <button v-for="r in g.items" :key="r.f.id" class="list-item" title="Edit feed" @click="edit(r.f)">
           <div class="time num">{{ formatClock(r.f.at) }}</div>
           <div class="grow">
             <div class="row" style="gap: 6px">
@@ -117,6 +117,7 @@ function edit(f: FeedEntry) {
           </div>
           <Bell v-if="r.f.source === 'notification'" :size="15" class="faint" aria-label="Logged from notification" />
           <span v-if="r.f.kind" class="chip">{{ KIND_LABEL[r.f.kind] }}</span>
+          <Pencil :size="15" class="faint" aria-hidden="true" />
         </button>
       </div>
     </template>
@@ -128,7 +129,7 @@ function edit(f: FeedEntry) {
   <FeedEditSheet
     v-model="editOpen"
     :entry="editing"
-    @save="(e) => store.update(e)"
+    @save="saveFeed"
     @delete="(id) => removeFeed(id)"
   />
 </template>

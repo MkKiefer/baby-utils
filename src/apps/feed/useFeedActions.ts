@@ -1,10 +1,10 @@
 import { toast } from '@/composables/useToast'
 import { formatClock } from '@/core/time'
 import { useFeedStore } from './store'
-import type { FeedKind } from './logic/types'
+import type { FeedEntry, FeedKind } from './logic/types'
 import { KIND_LABEL } from './logic/types'
 
-/** Logging with an Undo toast, shared by the timer and night views. */
+/** Logging/editing with an Undo toast, shared by the timer, night and history views. */
 export function useFeedActions() {
   const store = useFeedStore()
 
@@ -26,5 +26,14 @@ export function useFeedActions() {
     }
   }
 
-  return { logFeed, removeFeed }
+  async function saveFeed(entry: FeedEntry) {
+    const previous = store.feeds.find((f) => f.id === entry.id)
+    await store.update(entry)
+    toast(`Feed updated · ${formatClock(entry.at)}`, {
+      tone: 'ok',
+      ...(previous ? { action: { label: 'Undo', run: () => void store.update(previous) } } : {}),
+    })
+  }
+
+  return { logFeed, removeFeed, saveFeed }
 }
