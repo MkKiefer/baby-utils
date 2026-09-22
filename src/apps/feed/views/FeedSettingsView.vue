@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Info, RotateCcw } from 'lucide-vue-next'
+import { Info, Moon, RotateCcw } from 'lucide-vue-next'
 import DialInput from '@/components/DialInput.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
 import ToggleSwitch from '@/components/ToggleSwitch.vue'
@@ -9,7 +9,7 @@ import { notificationPermission, requestNotificationPermission } from '@/core/no
 import { showNotification } from '@/core/notify/scheduler'
 import { toast } from '@/composables/useToast'
 import { useFeedStore } from '../store'
-import { AGE_INTERVALS, JAUNDICE_MAX_MIN, MANUAL_MAX, MANUAL_MIN } from '../logic/intervals'
+import { AGE_INTERVALS, JAUNDICE_MAX_MIN, MANUAL_MAX, MANUAL_MIN, NIGHT_EXTRA_OPTIONS } from '../logic/intervals'
 import { RHYTHM_MAX_SAMPLES, RHYTHM_MIN_SAMPLES } from '../logic/rhythm'
 
 const store = useFeedStore()
@@ -34,6 +34,36 @@ watch(manual, (v) => {
   saveTimer = setTimeout(() => {
     if (v !== s.value.manualIntervalMin) void store.saveSettings({ manualIntervalMin: v })
   }, 350)
+})
+
+// ---------------------------------------------------------------- night
+const nightOn = computed({
+  get: () => s.value.night.enabled,
+  set: (enabled) => void store.saveSettings({ night: { ...s.value.night, enabled } }),
+})
+const nightExtra = computed({
+  get: () => s.value.night.extraMin,
+  set: (extraMin) => void store.saveSettings({ night: { ...s.value.night, extraMin } }),
+})
+const pad = (n: number) => String(n).padStart(2, '0')
+const toTime = (min: number) => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`
+function fromTime(v: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})/.exec(v)
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null
+}
+const nightStart = computed({
+  get: () => toTime(s.value.night.startMin),
+  set: (v) => {
+    const startMin = fromTime(v)
+    if (startMin != null) void store.saveSettings({ night: { ...s.value.night, startMin } })
+  },
+})
+const nightEnd = computed({
+  get: () => toTime(s.value.night.endMin),
+  set: (v) => {
+    const endMin = fromTime(v)
+    if (endMin != null) void store.saveSettings({ night: { ...s.value.night, endMin } })
+  },
 })
 
 // ---------------------------------------------------------------- jaundice
@@ -128,6 +158,42 @@ async function testNotification() {
           <strong class="num dial-value">{{ formatDuration(manual, { zeroMinutes: true }) }}</strong>
           <span class="tiny muted num">by age: {{ formatDuration(plan.interval.ageMin) }}</span>
         </DialInput>
+      </template>
+    </div>
+
+    <!-- ================================================================ night -->
+    <h2 class="section-title">Longer at night</h2>
+    <div class="card stack">
+      <div class="row">
+        <div class="grow">
+          <strong>Night interval</strong>
+          <p class="small muted">
+            Feeds that start at night get a longer interval, e.g. <b>3h +1h</b>. Only if baby is gaining well — ask
+            your midwife.
+          </p>
+        </div>
+        <ToggleSwitch v-model="nightOn" label="Longer interval at night" />
+      </div>
+      <template v-if="nightOn">
+        <div class="night-window">
+          <label>
+            <span class="tiny faint">From</span>
+            <input v-model.lazy="nightStart" class="input" type="time" />
+          </label>
+          <label>
+            <span class="tiny faint">Until</span>
+            <input v-model.lazy="nightEnd" class="input" type="time" />
+          </label>
+        </div>
+        <SegmentedControl
+          v-model="nightExtra"
+          label="Extra time at night"
+          :options="NIGHT_EXTRA_OPTIONS.map((m) => ({ value: m, label: formatOffset(m) }))"
+        />
+        <div v-if="s.jaundice.active" class="callout warn">
+          <Moon :size="18" />
+          <span>Paused while jaundice mode is on — feeds stay at least every {{ formatDuration(JAUNDICE_MAX_MIN) }}.</span>
+        </div>
       </template>
     </div>
 
@@ -262,6 +328,18 @@ async function testNotification() {
   font-size: 36px;
   font-weight: 900;
   letter-spacing: -0.02em;
+}
+
+.night-window {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.night-window label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .rhythm-status {

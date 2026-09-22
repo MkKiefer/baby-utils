@@ -18,6 +18,7 @@ export async function readFeedSettings(db: DB): Promise<FeedSettings> {
     ...stored,
     jaundice: { ...DEFAULT_FEED_SETTINGS.jaundice, ...stored?.jaundice },
     rhythm: { ...DEFAULT_FEED_SETTINGS.rhythm, ...stored?.rhythm },
+    night: { ...DEFAULT_FEED_SETTINGS.night, ...stored?.night },
   }
 }
 

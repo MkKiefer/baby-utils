@@ -28,6 +28,8 @@ const summary = computed(() => {
     status: p.status,
     ageDays: p.ageDays,
     interval: p.interval,
+    nightMin: p.nightMin,
+    night: store.settings.night,
     offsetMin: p.offsetMin,
     totalMin: p.totalMin,
     unanswered: p.unanswered,
@@ -52,7 +54,7 @@ const summary = computed(() => {
         <td>
           {{ formatDuration(plan.baseMin) }} ({{ plan.interval.source }}, age table {{ formatDuration(plan.interval.ageMin) }}{{
             plan.interval.jaundiceCapped ? ', jaundice cap' : ''
-          }}) {{ formatOffset(plan.offsetMin) }} rhythm = {{ formatDuration(plan.totalMin) }}
+          }}){{ plan.nightMin ? ` ${formatOffset(plan.nightMin)} night` : '' }} {{ formatOffset(plan.offsetMin) }} rhythm = {{ formatDuration(plan.totalMin) }}
         </td>
       </tr>
       <tr>
@@ -77,7 +79,9 @@ const summary = computed(() => {
     <tbody>
       <tr v-for="c in plan.cycles" :key="c.index">
         <th>Cycle {{ c.index }}</th>
-        <td>start {{ formatClock(c.startAt) }} · age {{ formatClock(c.baseAt) }} · due {{ formatClock(c.dueAt) }}</td>
+        <td>start {{ formatClock(c.startAt) }} · age {{ formatClock(c.baseAt) }} · due {{ formatClock(c.dueAt) }}{{
+          c.nightMin ? ` · night ${formatOffset(c.nightMin)}` : ''
+        }}</td>
       </tr>
     </tbody>
   </table>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { computeFeedPlan } from './plan'
 import { learnRhythm, rhythmBounds } from './rhythm'
-import { ageIntervalMin, resolveBaseInterval } from './intervals'
+import { ageIntervalMin, isNightTime, resolveBaseInterval } from './intervals'
 import { DEFAULT_FEED_SETTINGS, type FeedEntry, type FeedSettings } from './types'
 
 const MIN = 60_000
@@ -149,5 +149,48 @@ describe('feed plan', () => {
     const moved = { ...feed(T0), at: T0 + 20 * MIN }
     const b = computeFeedPlan({ feeds: [moved], settings: settings(), ageDays: 3, now: T0 })
     expect(a.notifications[0].id).not.toBe(b.notifications[0].id)
+  })
+})
+
+describe('night interval', () => {
+  const night = (patch: Partial<FeedSettings['night']> = {}) =>
+    settings({ night: { ...DEFAULT_FEED_SETTINGS.night, enabled: true, ...patch } })
+  const at = (h: number, m = 0) => new Date(2026, 8, 22, h, m).getTime()
+
+  it('detects windows that wrap past midnight', () => {
+    expect(isNightTime(at(21, 59), 22 * 60, 6 * 60)).toBe(false)
+    expect(isNightTime(at(22), 22 * 60, 6 * 60)).toBe(true)
+    expect(isNightTime(at(3), 22 * 60, 6 * 60)).toBe(true)
+    expect(isNightTime(at(6), 22 * 60, 6 * 60)).toBe(false)
+    expect(isNightTime(at(1), 0, 5 * 60)).toBe(true)
+    expect(isNightTime(at(5), 0, 5 * 60)).toBe(false)
+  })
+
+  it('stretches only cycles that start at night', () => {
+    const day = computeFeedPlan({ feeds: [feed(at(14))], settings: night(), ageDays: 3, now: at(14) })
+    expect(day.nightMin).toBe(0)
+    expect(day.totalMin).toBe(150)
+
+    // 21:00 +2.5h → 23:30 (day cycle), then 23:30 +2.5h +1h → 03:00 (night cycle).
+    const p = computeFeedPlan({ feeds: [feed(at(21))], settings: night(), ageDays: 3, now: at(21) })
+    expect(p.cycles.map((c) => [c.nightMin, (c.dueAt - at(21)) / MIN])).toEqual([
+      [0, 150],
+      [60, 360],
+    ])
+
+    const n = computeFeedPlan({ feeds: [feed(at(1))], settings: night({ extraMin: 90 }), ageDays: 3, now: at(1) })
+    expect(n.baseMin).toBe(240)
+    expect(n.nightMin).toBe(90)
+    expect((n.cycles[0].dueAt - at(1)) / MIN).toBe(240)
+  })
+
+  it('is off when disabled or with jaundice', () => {
+    const off = computeFeedPlan({ feeds: [feed(at(1))], settings: settings(), ageDays: 3, now: at(1) })
+    expect(off.totalMin).toBe(150)
+    const s = night()
+    s.jaundice = { active: true, since: at(0) }
+    const j = computeFeedPlan({ feeds: [feed(at(1))], settings: s, ageDays: 3, now: at(1) })
+    expect(j.nightMin).toBe(0)
+    expect(j.totalMin).toBe(120)
   })
 })

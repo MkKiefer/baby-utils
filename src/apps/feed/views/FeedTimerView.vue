@@ -54,6 +54,7 @@ const intervalSource = computed(() => {
   const p = plan.value
   const parts = [p.interval.source === 'manual' ? 'manual' : 'by age']
   if (p.interval.jaundiceCapped) parts.push('jaundice cap')
+  if (p.nightMin) parts.push(`night ${formatOffset(p.nightMin)}`)
   if (p.rhythm.state === 'learning') parts.push(`learning rhythm ${p.rhythm.usedCount}/3`)
   else if (p.rhythm.state === 'active' && p.offsetMin) parts.push('rhythm')
   return parts.join(' · ')

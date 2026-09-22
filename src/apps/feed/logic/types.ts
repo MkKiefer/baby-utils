@@ -27,6 +27,11 @@ export interface FeedSettings {
   manualIntervalMin: number
   jaundice: { active: boolean; since: number | null }
   rhythm: { enabled: boolean; resetAt: number | null }
+  /**
+   * Longer interval for feeds that start at night. `startMin`/`endMin` are minutes after
+   * local midnight; the window may wrap past midnight (22:00 → 06:00).
+   */
+  night: { enabled: boolean; startMin: number; endMin: number; extraMin: number }
   /** When the rhythm pushes the reminder later, still remind at the age-based time. */
   notifyAtBase: boolean
   /** Reminder cycles without a logged feed before going quiet (0 = reminders off). */
@@ -38,6 +43,7 @@ export const DEFAULT_FEED_SETTINGS: FeedSettings = {
   manualIntervalMin: 180,
   jaundice: { active: false, since: null },
   rhythm: { enabled: true, resetAt: null },
+  night: { enabled: false, startMin: 22 * 60, endMin: 6 * 60, extraMin: 60 },
   notifyAtBase: true,
   maxUnconfirmed: 2,
 }

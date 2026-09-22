@@ -40,3 +40,24 @@ export function resolveBaseInterval(settings: FeedSettings, ageDays: number | nu
     jaundiceCapped: capped,
   }
 }
+
+/** Choices for the night extension (minutes added to the interval). */
+export const NIGHT_EXTRA_OPTIONS = [30, 60, 90, 120] as const
+
+/** Whether `at` falls inside the local night window `[startMin, endMin)`, which may wrap midnight. */
+export function isNightTime(at: number, startMin: number, endMin: number): boolean {
+  const d = new Date(at)
+  const m = d.getHours() * 60 + d.getMinutes()
+  if (startMin === endMin) return false
+  return startMin < endMin ? m >= startMin && m < endMin : m >= startMin || m < endMin
+}
+
+/**
+ * Extra minutes for a cycle starting at `at`. Off with jaundice: those babies must not
+ * wait longer, night or not.
+ */
+export function nightExtraMin(settings: FeedSettings, at: number): number {
+  const n = settings.night
+  if (!n.enabled || settings.jaundice.active) return 0
+  return isNightTime(at, n.startMin, n.endMin) ? n.extraMin : 0
+}
