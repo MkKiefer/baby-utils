@@ -68,30 +68,32 @@ defineExpose({ refresh })
 
 <template>
   <table>
-    <tr>
-      <th>Permission</th>
-      <td>
-        <b>{{ notificationPermission }}</b>
-      </td>
-    </tr>
-    <tr>
-      <th>Scheduler</th>
-      <td>
-        {{ schedulerState.running ? 'running' : 'stopped' }} · {{ schedulerState.runs }} runs · last {{ fmt(schedulerState.lastRunAt) }}
-      </td>
-    </tr>
-    <tr>
-      <th>Next planned</th>
-      <td>{{ fmt(schedulerState.nextAt) }} {{ schedulerState.nextTitle }}</td>
-    </tr>
-    <tr>
-      <th>Badge</th>
-      <td>{{ schedulerState.badge }} ({{ schedulerState.badgeStatus || '—' }})</td>
-    </tr>
-    <tr>
-      <th>Rules</th>
-      <td>show if late ≤ {{ GRACE_MS / 60000 }}m, or ≤ {{ STALE_MS / 60000 }}m while the app is hidden; same tag → only newest</td>
-    </tr>
+    <tbody>
+      <tr>
+        <th>Permission</th>
+        <td>
+          <b>{{ notificationPermission }}</b>
+        </td>
+      </tr>
+      <tr>
+        <th>Scheduler</th>
+        <td>
+          {{ schedulerState.running ? 'running' : 'stopped' }} · {{ schedulerState.runs }} runs · last {{ fmt(schedulerState.lastRunAt) }}
+        </td>
+      </tr>
+      <tr>
+        <th>Next planned</th>
+        <td>{{ fmt(schedulerState.nextAt) }} {{ schedulerState.nextTitle }}</td>
+      </tr>
+      <tr>
+        <th>Badge</th>
+        <td>{{ schedulerState.badge }} ({{ schedulerState.badgeStatus || '—' }})</td>
+      </tr>
+      <tr>
+        <th>Rules</th>
+        <td>show if late ≤ {{ GRACE_MS / 60000 }}m, or ≤ {{ STALE_MS / 60000 }}m while the app is hidden; same tag → only newest</td>
+      </tr>
+    </tbody>
   </table>
   <JsonView v-if="schedulerState.errors.length || planErrors.length" :value="{ scheduler: schedulerState.errors, plan: planErrors }" />
 
@@ -106,13 +108,15 @@ defineExpose({ refresh })
 
   <strong class="small">Upcoming plan ({{ planned.length }})</strong>
   <table v-if="planned.length">
-    <tr v-for="n in planned" :key="n.id">
-      <th>{{ fmt(n.at) }}</th>
-      <td>
-        <b>{{ n.title }}</b> <span class="faint">[{{ n.source }}/{{ n.kind }}]</span><br />
-        <code class="tiny">{{ n.id }}</code>
-      </td>
-    </tr>
+    <tbody>
+      <tr v-for="n in planned" :key="n.id">
+        <th>{{ fmt(n.at) }}</th>
+        <td>
+          <b>{{ n.title }}</b> <span class="faint">[{{ n.source }}/{{ n.kind }}]</span><br />
+          <code class="tiny">{{ n.id }}</code>
+        </td>
+      </tr>
+    </tbody>
   </table>
   <p v-else class="tiny faint">Nothing planned.</p>
 
@@ -122,13 +126,15 @@ defineExpose({ refresh })
 
   <strong class="small">Log (IndexedDB notifLog, newest 50)</strong>
   <table v-if="log.length">
-    <tr v-for="l in log" :key="l.id">
-      <th>{{ fmt(l.firedAt) }}</th>
-      <td>
-        <b :class="l.status">{{ l.status }}</b>{{ l.reason ? ` (${l.reason})` : '' }} via {{ l.via }} — {{ l.title }}<br />
-        <span class="tiny faint">planned {{ fmt(l.at) }}</span>
-      </td>
-    </tr>
+    <tbody>
+      <tr v-for="l in log" :key="l.id">
+        <th>{{ fmt(l.firedAt) }}</th>
+        <td>
+          <b :class="l.status">{{ l.status }}</b>{{ l.reason ? ` (${l.reason})` : '' }} via {{ l.via }} — {{ l.title }}<br />
+          <span class="tiny faint">planned {{ fmt(l.at) }}</span>
+        </td>
+      </tr>
+    </tbody>
   </table>
   <p v-else class="tiny faint">Empty.</p>
   <ConfirmButton label="Clear log (re-arms reminders)" class="sm" @confirm="clearLog" />

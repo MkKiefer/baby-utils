@@ -50,32 +50,38 @@ function collect() {
     <button class="btn sm" @click="info = collect()">Refresh</button>
   </div>
   <table>
-    <tr v-for="(v, k) in info.app" :key="k">
-      <th>{{ k }}</th>
-      <td>
-        <code>{{ v }}</code>
-      </td>
-    </tr>
-    <tr v-for="(v, k) in info.platform" :key="k">
-      <th>{{ k }}</th>
-      <td>
-        <code>{{ v }}</code>
-      </td>
-    </tr>
+    <tbody>
+      <tr v-for="(v, k) in info.app" :key="k">
+        <th>{{ k }}</th>
+        <td>
+          <code>{{ v }}</code>
+        </td>
+      </tr>
+      <tr v-for="(v, k) in info.platform" :key="k">
+        <th>{{ k }}</th>
+        <td>
+          <code>{{ v }}</code>
+        </td>
+      </tr>
+    </tbody>
   </table>
   <strong class="small">Feature support</strong>
   <table>
-    <tr v-for="(v, k) in info.features" :key="k">
-      <th>{{ k }}</th>
-      <td :class="v === 'yes' ? 'yes' : 'no'">{{ v }}</td>
-    </tr>
+    <tbody>
+      <tr v-for="(v, k) in info.features" :key="k">
+        <th>{{ k }}</th>
+        <td :class="v === 'yes' ? 'yes' : 'no'">{{ v }}</td>
+      </tr>
+    </tbody>
   </table>
   <strong class="small">Registered sub-apps</strong>
   <table>
-    <tr v-for="a in subApps" :key="a.id">
-      <th>{{ a.id }}</th>
-      <td>{{ a.name }} · {{ a.routes.length }} routes · {{ a.debugSections?.length ?? 0 }} debug sections</td>
-    </tr>
+    <tbody>
+      <tr v-for="a in subApps" :key="a.id">
+        <th>{{ a.id }}</th>
+        <td>{{ a.name }} · {{ a.routes.length }} routes · {{ a.debugSections?.length ?? 0 }} debug sections</td>
+      </tr>
+    </tbody>
   </table>
 </template>
 

@@ -47,38 +47,44 @@ defineExpose({ refresh })
 <template>
   <strong class="small">Storage (navigator.storage)</strong>
   <table>
-    <tr>
-      <th>Persisted</th>
-      <td>{{ storageState.persisted ?? 'unknown' }}</td>
-    </tr>
-    <tr>
-      <th>Usage / quota</th>
-      <td>{{ formatBytes(storageState.usage) }} / {{ formatBytes(storageState.quota) }}</td>
-    </tr>
+    <tbody>
+      <tr>
+        <th>Persisted</th>
+        <td>{{ storageState.persisted ?? 'unknown' }}</td>
+      </tr>
+      <tr>
+        <th>Usage / quota</th>
+        <td>{{ formatBytes(storageState.usage) }} / {{ formatBytes(storageState.quota) }}</td>
+      </tr>
+    </tbody>
   </table>
   <JsonView v-if="storageState.details" :value="storageState.details" />
   <button class="btn sm" style="align-self: flex-start" @click="requestPersistence">Request persistence</button>
 
   <strong class="small">Permissions API</strong>
   <table>
-    <tr v-for="(v, k) in permissions" :key="k">
-      <th>{{ k }}</th>
-      <td>{{ v }}</td>
-    </tr>
+    <tbody>
+      <tr v-for="(v, k) in permissions" :key="k">
+        <th>{{ k }}</th>
+        <td>{{ v }}</td>
+      </tr>
+    </tbody>
   </table>
 
   <strong class="small">Periodic Background Sync</strong>
   <table>
-    <tr>
-      <th>Registration</th>
-      <td>{{ swState.periodicSync || '—' }}</td>
-    </tr>
-    <tr>
-      <th>Tags</th>
-      <td>
-        <code>{{ periodicTags }}</code>
-      </td>
-    </tr>
+    <tbody>
+      <tr>
+        <th>Registration</th>
+        <td>{{ swState.periodicSync || '—' }}</td>
+      </tr>
+      <tr>
+        <th>Tags</th>
+        <td>
+          <code>{{ periodicTags }}</code>
+        </td>
+      </tr>
+    </tbody>
   </table>
 
   <strong class="small">Screen Wake Lock</strong>
@@ -96,12 +102,14 @@ defineExpose({ refresh })
 
   <strong class="small">BroadcastChannel "{{ syncInfo.channel }}" · this context {{ syncInfo.origin }}</strong>
   <table v-if="messages.length">
-    <tr v-for="m in messages" :key="`${m.at}-${m.origin}-${m.scope}`">
-      <th>{{ formatDateTime(m.at) }}</th>
-      <td>
-        {{ m.scope }} · {{ m.local ? 'local' : `from ${m.origin}` }}
-      </td>
-    </tr>
+    <tbody>
+      <tr v-for="m in messages" :key="`${m.at}-${m.origin}-${m.scope}`">
+        <th>{{ formatDateTime(m.at) }}</th>
+        <td>
+          {{ m.scope }} · {{ m.local ? 'local' : `from ${m.origin}` }}
+        </td>
+      </tr>
+    </tbody>
   </table>
   <p v-else class="tiny faint">No messages yet.</p>
 </template>

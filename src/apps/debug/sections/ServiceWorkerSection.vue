@@ -43,12 +43,14 @@ defineExpose({ refresh })
 
 <template>
   <table>
-    <tr v-for="(v, k) in info" :key="k">
-      <th>{{ k }}</th>
-      <td>
-        <code>{{ v }}</code>
-      </td>
-    </tr>
+    <tbody>
+      <tr v-for="(v, k) in info" :key="k">
+        <th>{{ k }}</th>
+        <td>
+          <code>{{ v }}</code>
+        </td>
+      </tr>
+    </tbody>
   </table>
   <div class="row">
     <button class="btn sm" :disabled="checking" @click="checkUpdate">Check for update</button>

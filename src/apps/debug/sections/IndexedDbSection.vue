@@ -89,18 +89,20 @@ defineExpose({ refresh })
 
 <template>
   <table>
-    <tr>
-      <th>Database</th>
-      <td>
-        <code>{{ DB_NAME }}</code> v{{ version }}
-      </td>
-    </tr>
-    <tr v-if="databases">
-      <th>All databases on origin</th>
-      <td>
-        <code v-for="d in databases" :key="d.name">{{ d.name }} (v{{ d.version }}) </code>
-      </td>
-    </tr>
+    <tbody>
+      <tr>
+        <th>Database</th>
+        <td>
+          <code>{{ DB_NAME }}</code> v{{ version }}
+        </td>
+      </tr>
+      <tr v-if="databases">
+        <th>All databases on origin</th>
+        <td>
+          <code v-for="d in databases" :key="d.name">{{ d.name }} (v{{ d.version }}) </code>
+        </td>
+      </tr>
+    </tbody>
   </table>
 
   <div v-for="s in stores" :key="s.name" class="store">

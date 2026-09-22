@@ -36,19 +36,21 @@ defineExpose({ refresh })
   <template v-for="area in ['localStorage', 'sessionStorage'] as const" :key="area">
     <strong class="small">{{ area }} ({{ entries[area].length }})</strong>
     <table v-if="entries[area].length">
-      <tr v-for="e in entries[area]" :key="e.key">
-        <th>
-          <code>{{ e.key }}</code>
-        </th>
-        <td>
-          <code>{{ e.value }}</code>
-        </td>
-        <td style="width: 36px">
-          <button class="icon-btn" style="width: 30px; height: 30px" aria-label="Remove" @click="remove(area, e.key)">
-            <Trash2 :size="14" />
-          </button>
-        </td>
-      </tr>
+      <tbody>
+        <tr v-for="e in entries[area]" :key="e.key">
+          <th>
+            <code>{{ e.key }}</code>
+          </th>
+          <td>
+            <code>{{ e.value }}</code>
+          </td>
+          <td style="width: 36px">
+            <button class="icon-btn" style="width: 30px; height: 30px" aria-label="Remove" @click="remove(area, e.key)">
+              <Trash2 :size="14" />
+            </button>
+          </td>
+        </tr>
+      </tbody>
     </table>
     <p v-else class="tiny faint">Empty.</p>
   </template>

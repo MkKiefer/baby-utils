@@ -27,50 +27,58 @@ const summary = computed(() => {
 
 <template>
   <table>
-    <tr>
-      <th>Status</th>
-      <td>
-        <b>{{ plan.status }}</b>
-      </td>
-    </tr>
-    <tr>
-      <th>Interval</th>
-      <td>
-        {{ formatDuration(plan.baseMin) }} ({{ plan.interval.source }}, age table {{ formatDuration(plan.interval.ageMin) }}{{
-          plan.interval.jaundiceCapped ? ', jaundice cap' : ''
-        }}) {{ formatOffset(plan.offsetMin) }} rhythm = {{ formatDuration(plan.totalMin) }}
-      </td>
-    </tr>
-    <tr>
-      <th>Feeds in store</th>
-      <td>{{ store.feeds.length }}</td>
-    </tr>
+    <tbody>
+      <tr>
+        <th>Status</th>
+        <td>
+          <b>{{ plan.status }}</b>
+        </td>
+      </tr>
+      <tr>
+        <th>Interval</th>
+        <td>
+          {{ formatDuration(plan.baseMin) }} ({{ plan.interval.source }}, age table {{ formatDuration(plan.interval.ageMin) }}{{
+            plan.interval.jaundiceCapped ? ', jaundice cap' : ''
+          }}) {{ formatOffset(plan.offsetMin) }} rhythm = {{ formatDuration(plan.totalMin) }}
+        </td>
+      </tr>
+      <tr>
+        <th>Feeds in store</th>
+        <td>{{ store.feeds.length }}</td>
+      </tr>
+    </tbody>
   </table>
 
   <strong class="small">Reminder cycles</strong>
   <table>
-    <tr v-for="c in plan.cycles" :key="c.index">
-      <th>Cycle {{ c.index }}</th>
-      <td>start {{ formatClock(c.startAt) }} · age {{ formatClock(c.baseAt) }} · due {{ formatClock(c.dueAt) }}</td>
-    </tr>
+    <tbody>
+      <tr v-for="c in plan.cycles" :key="c.index">
+        <th>Cycle {{ c.index }}</th>
+        <td>start {{ formatClock(c.startAt) }} · age {{ formatClock(c.baseAt) }} · due {{ formatClock(c.dueAt) }}</td>
+      </tr>
+    </tbody>
   </table>
 
   <strong class="small">Rhythm samples (newest first)</strong>
   <table>
-    <tr>
-      <th style="width: auto">Interval</th>
-      <th style="width: auto">Actual</th>
-      <th style="width: auto">Planned</th>
-      <th style="width: auto">Δ</th>
-      <th style="width: auto">Used</th>
-    </tr>
-    <tr v-for="s in plan.rhythm.samples" :key="s.toAt">
-      <td>{{ formatClock(s.fromAt) }}→{{ formatClock(s.toAt) }}</td>
-      <td>{{ formatDuration(s.actualMin) }}</td>
-      <td>{{ formatDuration(s.plannedMin) }}</td>
-      <td>{{ formatOffset(Math.round(s.deltaMin)) }}</td>
-      <td>{{ s.used ? 'yes' : s.excluded }}</td>
-    </tr>
+    <thead>
+      <tr>
+        <th style="width: auto">Interval</th>
+        <th style="width: auto">Actual</th>
+        <th style="width: auto">Planned</th>
+        <th style="width: auto">Δ</th>
+        <th style="width: auto">Used</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr v-for="s in plan.rhythm.samples" :key="s.toAt">
+        <td>{{ formatClock(s.fromAt) }}→{{ formatClock(s.toAt) }}</td>
+        <td>{{ formatDuration(s.actualMin) }}</td>
+        <td>{{ formatDuration(s.plannedMin) }}</td>
+        <td>{{ formatOffset(Math.round(s.deltaMin)) }}</td>
+        <td>{{ s.used ? 'yes' : s.excluded }}</td>
+      </tr>
+    </tbody>
   </table>
 
   <strong class="small">Planned notifications</strong>
