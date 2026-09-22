@@ -33,19 +33,15 @@ Vite build, and the static result is served by unprivileged nginx (non-root, rea
 filesystem) on port 8080.
 
 ```bash
-cp .env.example .env               # optional: WEB_PORT, DOMAIN
-docker compose up -d --build       # → http://localhost:8080
+cp .env.example .env               # set DOMAIN (and optionally SUBDOMAIN)
+docker compose up -d --build       # → https://baby.$DOMAIN
 ```
 
-**Phones need HTTPS.** Service workers, installation and notifications only work in a secure
-context; `localhost` is the only exception. Pick one:
-
-- **Built-in HTTPS:** set `DOMAIN` in `.env` to a hostname whose DNS points at this server
-  (ports 80 and 443 reachable) and run `docker compose --profile https up -d --build`. Caddy
-  obtains and renews a Let's Encrypt certificate and adds HSTS. Set
-  `WEB_PORT=127.0.0.1:8080` so the plain-HTTP port is not exposed.
-- **Your own reverse proxy** (Traefik, nginx, Caddy, …): terminate TLS there and proxy to the
-  `web` container on port 8080.
+The container publishes no ports. It joins the external `proxy` Docker network and is routed
+by an existing Traefik instance via labels (`websecure` entrypoint, `Host(baby.$DOMAIN)`),
+which also terminates TLS. The network must exist (`docker network create proxy`) and
+Traefik must be attached to it. Phones need HTTPS: service workers, installation and
+notifications only work in a secure context (`localhost` is the only exception).
 
 `deploy/nginx.conf` takes care of what a PWA needs from the server:
 
@@ -56,8 +52,7 @@ context; `localhost` is the only exception. Pick one:
 - `/healthz` for the container health check.
 
 To update: `git pull && docker compose up -d --build`. The container is stateless — all data
-lives on the devices, so there is nothing to back up on the server (Caddy keeps its
-certificates in the `caddy-data` volume).
+lives on the devices, so there is nothing to back up on the server.
 
 ## How it's built
 
