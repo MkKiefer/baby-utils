@@ -9,7 +9,7 @@ import { themeState } from '@/core/theme'
 import { formatDateTime } from '@/core/time'
 import JsonView from '../components/JsonView.vue'
 
-const PERMISSIONS = ['notifications', 'persistent-storage', 'periodic-background-sync', 'screen-wake-lock', 'background-sync']
+const PERMISSIONS = ['notifications', 'persistent-storage', 'periodic-background-sync', 'screen-wake-lock', 'background-sync', 'camera']
 const permissions = ref<Record<string, string>>({})
 const periodicTags = ref<string[] | string>('—')
 const messages = ref<ChangeEvent[]>([])

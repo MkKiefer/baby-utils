@@ -41,8 +41,10 @@ export interface MergeStats {
 export interface LastMerge extends MergeStats {
   /** When the merge ran. */
   at: number
-  /** `exportedAt` of the file that was merged in. */
+  /** `exportedAt` of the file (or `sentAt` of the QR sync) that was merged in. */
   from: number
+  /** How the other device's data arrived; missing on merges from before QR sync. */
+  via?: 'file' | 'nearby'
 }
 
 export const LAST_MERGE_KEY = 'merge.last'
@@ -150,9 +152,14 @@ function incomingFeeds(backup: Backup): unknown[] {
 }
 
 /** Merges a backup's feed log into this device. Leaves settings and profile untouched. */
-export async function mergeBackup(backup: Backup): Promise<MergeStats> {
+export function mergeBackup(backup: Backup): Promise<MergeStats> {
+  return mergeFeeds(incomingFeeds(backup), backup.exportedAt, 'file')
+}
+
+/** Merges feed records from another device, however they arrived. */
+export async function mergeFeeds(incoming: unknown[], from: number, via: LastMerge['via']): Promise<MergeStats> {
   const db = await getDB()
-  const { writes, stats } = mergeFeedRecords(await readFeedRecords(db), incomingFeeds(backup))
+  const { writes, stats } = mergeFeedRecords(await readFeedRecords(db), incoming)
 
   if (writes.length) {
     const tx = db.transaction('feeds', 'readwrite')
@@ -160,7 +167,7 @@ export async function mergeBackup(backup: Backup): Promise<MergeStats> {
     await tx.done
   }
 
-  const last: LastMerge = { ...stats, at: Date.now(), from: backup.exportedAt }
+  const last: LastMerge = { ...stats, at: Date.now(), from, via }
   await db.put('kv', plain(last), LAST_MERGE_KEY)
   // 'all' rather than 'feeds': the feed store only reloads on a foreign or global change.
   emitChange('all')
