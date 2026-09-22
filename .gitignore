@@ -10,6 +10,9 @@ dev-dist
 coverage
 test-results
 
+# Sync API state in local development (npm run api)
+server/data
+
 # Env / local overrides
 .env
 .env.*

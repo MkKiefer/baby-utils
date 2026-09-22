@@ -19,7 +19,7 @@ interface BarcodeDetectorCtor {
 
 const NativeDetector = (globalThis as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector
 
-/** Scanner state for the sync screen and the Debug app. */
+/** Scanner state for the sync pairing screen and the Debug app. */
 export const scannerState = reactive({
   engine: '' as '' | 'BarcodeDetector' | 'jsQR',
   camera: 'idle' as 'idle' | 'starting' | 'active' | 'error',

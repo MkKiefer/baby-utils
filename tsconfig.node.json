@@ -11,6 +11,7 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
     "paths": { "@/*": ["./src/*"] }
   },
   "include": ["vite.config.ts", "pwa-assets.config.ts", "src/**/*.test.ts"]

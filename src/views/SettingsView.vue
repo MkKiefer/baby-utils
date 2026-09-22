@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
-import { Bug, ChevronRight, Download, QrCode, Smartphone, Upload } from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
+import { Bug, ChevronRight, Cloud, Download, Smartphone, Upload } from 'lucide-vue-next'
 import AppBar from '@/components/AppBar.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
 import ConfirmButton from '@/components/ConfirmButton.vue'
@@ -12,6 +12,8 @@ import { formatBytes, refreshStorage, requestPersistence, storageState } from '@
 import { exportBackupFile, parseBackup, restoreBackup, wipeAllData } from '@/core/backup'
 import { describeMerge, mergeBackup } from '@/core/merge'
 import { isStandalone } from '@/core/platform'
+import { cloud, leaveGroup } from '@/core/cloud/service'
+import { formatDateTime } from '@/core/time'
 import { toast } from '@/composables/useToast'
 import { useRouter } from 'vue-router'
 
@@ -80,7 +82,18 @@ async function doImport(e: Event) {
   }
 }
 
+const syncSummary = computed(() => {
+  const c = cloud.config
+  if (!c) return 'Off · end-to-end encrypted, optional'
+  if (!c.enabled) return 'Paused'
+  if (cloud.state.lastError) return cloud.state.lastError
+  const phones = cloud.state.members.length + 1
+  const when = cloud.state.lastSyncAt ? ` · ${formatDateTime(cloud.state.lastSyncAt)}` : ''
+  return `On · ${phones} ${phones === 1 ? 'phone' : 'phones'}${when}`
+})
+
 async function wipe() {
+  await leaveGroup()
   await wipeAllData()
   await profileStore.load()
   await router.replace('/setup')
@@ -158,11 +171,9 @@ onMounted(refreshStorage)
           </button>
         </div>
         <RouterLink to="/sync" class="list-item" style="text-decoration: none">
-          <QrCode :size="20" />
+          <Cloud :size="20" />
           <span class="grow"
-            ><strong>Sync with nearby phone</strong><br /><span class="small muted"
-              >Scan a code on the other phone · no internet needed</span
-            ></span
+            ><strong>Sync between phones</strong><br /><span class="small muted">{{ syncSummary }}</span></span
           >
           <ChevronRight :size="18" class="faint" />
         </RouterLink>

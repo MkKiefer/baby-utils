@@ -1,3 +1,18 @@
+# ---- api: the optional sync relay (`docker compose` builds it with target: api) -------
+# Dependency-free Node; it only stores and forwards end-to-end encrypted messages.
+FROM node:24-alpine AS api
+WORKDIR /app
+COPY server/package.json server/*.ts ./server/
+RUN rm -f server/*.test.ts && mkdir -p /data && chown node:node /data
+ENV NODE_ENV=production PORT=8787 DATA_DIR=/data
+USER node
+EXPOSE 8787
+VOLUME /data
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8787/api/sync/v1/health || exit 1
+WORKDIR /app/server
+CMD ["node", "main.ts"]
+
 # ---- build: install, test, type-check and bundle the PWA -----------------------------
 FROM node:24-alpine AS build
 WORKDIR /app

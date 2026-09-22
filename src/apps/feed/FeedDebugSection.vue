@@ -64,7 +64,7 @@ const summary = computed(() => {
         <td>
           <template v-if="lastMerge">
             {{ formatDateTime(lastMerge.at) }} · from
-            {{ lastMerge.via === 'nearby' ? 'a nearby sync code of' : 'a backup of' }} {{ formatDateTime(lastMerge.from) }}
+            {{ lastMerge.via === 'cloud' ? 'relay sync sent' : lastMerge.via === 'nearby' ? 'a nearby sync code of' : 'a backup of' }} {{ formatDateTime(lastMerge.from) }}
           </template>
           <template v-else>never</template>
         </td>

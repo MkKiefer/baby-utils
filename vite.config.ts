@@ -12,6 +12,9 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
+  // `npm run api` in a second terminal serves the sync API on :8787.
+  server: { proxy: { '/api/sync': 'http://127.0.0.1:8787' } },
+  preview: { proxy: { '/api/sync': 'http://127.0.0.1:8787' } },
   plugins: [
     vue(),
     VitePWA({
@@ -46,6 +49,6 @@ export default defineConfig({
   ],
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'server/**/*.test.ts'],
   },
 })

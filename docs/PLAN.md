@@ -1,7 +1,8 @@
 # Baby Utils — Plan (v1, implemented)
 
 A device-local Vue 3 PWA that works like an "app of apps": a launcher home screen
-showing the baby's age plus tiles for sub-apps. No backend, no API, no push server.
+showing the baby's age plus tiles for sub-apps. No backend and no push server; the only
+server part is the optional end-to-end encrypted sync relay (`server/`, see README).
 
 ## 1. Stack
 

@@ -1,0 +1,90 @@
+{
+  // Multi-root workspace: File → Open Workspace from File… → baby-utils.code-workspace
+  // "app" is the PWA (repo root), "api" the optional sync relay (server/).
+  "folders": [
+    { "name": "app", "path": "." },
+    { "name": "api", "path": "server" }
+  ],
+  "settings": {
+    // The api folder is shown as its own root, so hide it inside the app root.
+    "files.exclude": { "server": true },
+    "search.exclude": { "**/node_modules": true, "**/dist": true, "**/data": true },
+    "typescript.tsdk": "node_modules/typescript/lib",
+    "editor.formatOnSave": false
+  },
+  "extensions": {
+    "recommendations": ["Vue.volar", "vitest.explorer"]
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "app: dev",
+        "type": "npm",
+        "script": "dev",
+        "path": ".",
+        "isBackground": true,
+        "problemMatcher": [],
+        "options": { "cwd": "${workspaceFolder:app}" }
+      },
+      {
+        "label": "api: dev",
+        "type": "shell",
+        "command": "npm run dev",
+        "isBackground": true,
+        "problemMatcher": [],
+        "options": { "cwd": "${workspaceFolder:api}" }
+      },
+      {
+        "label": "app + api: dev",
+        "dependsOn": ["api: dev", "app: dev"],
+        "dependsOrder": "parallel",
+        "problemMatcher": []
+      },
+      {
+        "label": "test (app + api)",
+        "type": "shell",
+        "command": "npm test",
+        "group": { "kind": "test", "isDefault": true },
+        "problemMatcher": [],
+        "options": { "cwd": "${workspaceFolder:app}" }
+      },
+      {
+        "label": "typecheck (app + api)",
+        "type": "shell",
+        "command": "npm run typecheck",
+        "problemMatcher": ["$tsc"],
+        "options": { "cwd": "${workspaceFolder:app}" }
+      }
+    ]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "api: debug relay",
+        "type": "node",
+        "request": "launch",
+        "cwd": "${workspaceFolder:api}",
+        "program": "${workspaceFolder:api}/main.ts",
+        "env": { "PORT": "8787", "DATA_DIR": "./data" },
+        "console": "integratedTerminal",
+        "skipFiles": ["<node_internals>/**"]
+      },
+      {
+        "name": "app: Chrome",
+        "type": "chrome",
+        "request": "launch",
+        "url": "http://localhost:5173",
+        "webRoot": "${workspaceFolder:app}/src"
+      }
+    ],
+    "compounds": [
+      {
+        "name": "app + api",
+        // Start the "app: dev" task first (Vite on :5173).
+        "configurations": ["api: debug relay", "app: Chrome"]
+      }
+    ]
+  }
+}

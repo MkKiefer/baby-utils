@@ -9,7 +9,7 @@ import CacheSection from '../sections/CacheSection.vue'
 import ServiceWorkerSection from '../sections/ServiceWorkerSection.vue'
 import NotificationsSection from '../sections/NotificationsSection.vue'
 import DeviceApisSection from '../sections/DeviceApisSection.vue'
-import NearbySection from '../sections/NearbySection.vue'
+import CloudSyncSection from '../sections/CloudSyncSection.vue'
 
 /**
  * Every browser feature the app uses has an inspector here. Sub-apps contribute their own
@@ -23,7 +23,7 @@ const sections: { id: string; title: string; subtitle?: string; component: Compo
   { id: 'sw', title: 'Service worker', subtitle: 'registration', component: markRaw(ServiceWorkerSection) },
   { id: 'cache', title: 'Cache Storage', subtitle: 'offline files', component: markRaw(CacheSection) },
   { id: 'apis', title: 'Device APIs', subtitle: 'storage, permissions, wake lock…', component: markRaw(DeviceApisSection) },
-  { id: 'nearby', title: 'Nearby sync (QR)', subtitle: 'camera, codes, payload', component: markRaw(NearbySection) },
+  { id: 'cloud', title: 'Relay sync (E2E)', subtitle: 'group, keys, pending, relay', component: markRaw(CloudSyncSection) },
   ...subApps.flatMap((app) =>
     (app.debugSections ?? []).map((s) => ({
       id: `${app.id}:${s.id}`,

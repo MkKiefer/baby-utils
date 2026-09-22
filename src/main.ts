@@ -8,6 +8,7 @@ import { applyTheme } from './core/theme'
 import { captureInstallPrompt, initServiceWorker } from './core/pwa'
 import { startScheduler } from './core/notify/scheduler'
 import { refreshStorage } from './core/storage'
+import { startCloudSync } from './core/cloud/service'
 
 captureInstallPrompt()
 applyTheme()
@@ -20,6 +21,7 @@ app.mount('#app')
 initServiceWorker()
 startScheduler()
 void refreshStorage()
+startCloudSync()
 
 // Notification taps focus an open window and ask it to navigate (see sw.ts).
 navigator.serviceWorker?.addEventListener('message', (event) => {

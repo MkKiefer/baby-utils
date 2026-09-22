@@ -1,0 +1,16 @@
+{
+  "name": "baby-utils-api",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Sync relay for Baby Utils: buffers and forwards end-to-end encrypted messages. No dependencies.",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node main.ts",
+    "dev": "node --watch main.ts",
+    "test": "vitest run --dir .",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

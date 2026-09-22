@@ -41,10 +41,10 @@ export interface MergeStats {
 export interface LastMerge extends MergeStats {
   /** When the merge ran. */
   at: number
-  /** `exportedAt` of the file (or `sentAt` of the QR sync) that was merged in. */
+  /** `exportedAt` of the file (or the newest `sentAt` of a relay sync) that was merged in. */
   from: number
-  /** How the other device's data arrived; missing on merges from before QR sync. */
-  via?: 'file' | 'nearby'
+  /** How the other device's data arrived; missing on old merges, 'nearby' was the retired QR sync. */
+  via?: 'file' | 'nearby' | 'cloud'
 }
 
 export const LAST_MERGE_KEY = 'merge.last'

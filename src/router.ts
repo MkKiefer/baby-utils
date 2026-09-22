@@ -8,7 +8,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/', component: HomeView, meta: { title: 'Home' } },
   { path: '/setup', component: () => import('./views/OnboardingView.vue'), meta: { title: 'Welcome' } },
   { path: '/settings', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
-  { path: '/sync', component: () => import('./views/NearbySyncView.vue'), meta: { title: 'Sync nearby' } },
+  { path: '/sync', component: () => import('./views/SyncView.vue'), meta: { title: 'Sync' } },
   // Each sub-app lives under /app/<id>; child meta is merged with the parent's `appId`.
   ...subApps.map<RouteRecordRaw>((app) => ({
     path: `/app/${app.id}`,
