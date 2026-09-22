@@ -9,7 +9,7 @@ USER node
 EXPOSE 8787
 VOLUME /data
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1:8787/api/sync/v1/health || exit 1
+  CMD wget -q -O /dev/null http://127.0.0.1:8787/api/sync/v2/health || exit 1
 WORKDIR /app/server
 CMD ["node", "main.ts"]
 

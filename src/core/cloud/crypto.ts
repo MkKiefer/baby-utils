@@ -4,10 +4,11 @@
  * A group is a 256-bit random secret that only its devices know. From it each device
  * derives, with HKDF-SHA256, two independent values:
  *
- *   - the group id — the relay's mailbox address, which is all the server ever sees;
+ *   - the relay token — the bearer credential for the group's mailbox on the relay, which
+ *     files it under the group id SHA-256(token); the id alone grants nothing;
  *   - an AES-256-GCM key that encrypts and authenticates every message.
  *
- * HKDF is one-way, so knowing the group id (the relay does) reveals nothing about the key.
+ * HKDF is one-way, so knowing the token (the relay does) reveals nothing about the key.
  * Each message is bound to its group and sender through the GCM additional data: the relay
  * cannot read a message, alter it, or pass it off as coming from another member. Only a
  * device holding the secret can produce a message the others accept, which is how the
@@ -15,6 +16,9 @@
  */
 
 export interface GroupKeys {
+  /** Sent to the relay as `Authorization: Bearer`; never in a URL. */
+  token: string
+  /** SHA-256 of the token: the relay's name for the group, and part of every message's AAD. */
   groupId: string
   key: CryptoKey
 }
@@ -27,6 +31,8 @@ const IV_BYTES = 12
 /** Wire format byte 0; byte 1 is flags (bit 0 = deflate-raw before encryption). */
 const FORMAT = 1
 const FLAG_DEFLATE = 1
+/** A decrypted message may inflate to at most this, so a crafted one cannot exhaust memory. */
+export const MAX_PLAIN_BYTES = 32 * 1024 * 1024
 
 export function toBase64Url(bytes: Uint8Array): string {
   let bin = ''
@@ -77,19 +83,38 @@ export async function deriveGroup(secret: string): Promise<GroupKeys> {
     salt: encoder.encode('baby-utils sync v1'),
     info: encoder.encode(info),
   })
-  const id = new Uint8Array(await crypto.subtle.deriveBits(params('group id'), ikm, 256))
+  const token = toBase64Url(new Uint8Array(await crypto.subtle.deriveBits(params('relay token'), ikm, 256)))
+  const groupId = toBase64Url(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(token))))
   const key = await crypto.subtle.deriveKey(params('message key'), ikm, { name: 'AES-GCM', length: 256 }, false, [
     'encrypt',
     'decrypt',
   ])
-  return { groupId: toBase64Url(id), key }
+  return { token, groupId, key }
 }
 
 const canDeflate = typeof CompressionStream !== 'undefined'
 
 async function transform(bytes: Uint8Array<ArrayBuffer>, stream: CompressionStream | DecompressionStream) {
-  const out = new Response(new Blob([bytes]).stream().pipeThrough(stream))
-  return new Uint8Array(await out.arrayBuffer())
+  const reader = new Blob([bytes]).stream().pipeThrough(stream).getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.length
+    if (size > MAX_PLAIN_BYTES) {
+      await reader.cancel()
+      throw new Error('Message too large')
+    }
+    chunks.push(value)
+  }
+  const out = new Uint8Array(size)
+  let offset = 0
+  for (const c of chunks) {
+    out.set(c, offset)
+    offset += c.length
+  }
+  return out
 }
 
 function aad(groupId: string, from: string) {

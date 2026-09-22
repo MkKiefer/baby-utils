@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createHandler, PREFIX } from '../../../server/http.ts'
+import { createHandler, groupIdFor, PREFIX } from '../../../server/http.ts'
 import { SyncStore } from '../../../server/store.ts'
 import { mergeFeedRecords } from '../merge'
 import type { FeedEntry } from '@/apps/feed/logic/types'
@@ -11,6 +11,7 @@ import {
   deriveGroup,
   encryptMessage,
   inviteFor,
+  MAX_PLAIN_BYTES,
   newGroupSecret,
   newMemberId,
   parseInvite,
@@ -24,8 +25,13 @@ describe('crypto', () => {
     const a = await deriveGroup(secret)
     const b = await deriveGroup(secret)
     expect(a.groupId).toBe(b.groupId)
+    expect(a.token).toBe(b.token)
     expect(a.groupId).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(a.token).toMatch(/^[A-Za-z0-9_-]{43}$/)
     expect(a.groupId).not.toContain(secret)
+    expect(a.token).not.toBe(secret)
+    // The relay files the group under the same id the phones bind into every message.
+    expect(groupIdFor(a.token)).toBe(a.groupId)
     expect((await deriveGroup(newGroupSecret())).groupId).not.toBe(a.groupId)
   })
 
@@ -40,6 +46,15 @@ describe('crypto', () => {
     await expect(decryptMessage(keys, newMemberId(), body)).rejects.toThrow()
     const flipped = body.slice(0, -2) + (body.at(-2) === 'A' ? 'B' : 'A') + body.at(-1)
     await expect(decryptMessage(keys, from, flipped)).rejects.toThrow()
+  })
+
+  it('refuses to inflate a message beyond the size cap', async () => {
+    const keys = await deriveGroup(newGroupSecret())
+    const from = newMemberId()
+    // Highly compressible: a few KB of ciphertext that would inflate past the cap.
+    const body = await encryptMessage(keys, from, 'a'.repeat(MAX_PLAIN_BYTES + 1))
+    expect(body.length).toBeLessThan(200_000)
+    await expect(decryptMessage(keys, from, body)).rejects.toThrow('Message too large')
   })
 
   it('parses invites and bare secrets', () => {
@@ -176,16 +191,16 @@ describe('relay sync', () => {
     const [a, b] = phones as [Phone, Phone]
     await a.sync()
     await b.sync()
-    // Someone who learned the group id (e.g. the relay itself) but not the key.
+    // Someone who learned the relay token (e.g. the relay itself) but not the key.
     const intruder = newMemberId()
-    await relay.join(keys.groupId, intruder)
+    await relay.join(keys.token, intruder)
     const forged = await encryptMessage(await deriveGroup(newGroupSecret()), intruder, {
       v: 1,
       label: 'evil',
       sentAt: 0,
       feeds: [feed('evil', 1)],
     })
-    await relay.post(keys.groupId, intruder, forged)
+    await relay.post(keys.token, intruder, forged)
     const round = await a.sync()
     expect(round.rejected).toBe(1)
     expect(a.records.has('evil')).toBe(false)

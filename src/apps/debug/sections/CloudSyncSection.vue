@@ -31,7 +31,7 @@ async function refresh() {
   }
   if (c) {
     Object.assign(info.value, {
-      'Group id (what the server sees)': (await groupKeys(c.secret)).groupId,
+      'Group id (relay name, SHA-256 of the relay token)': (await groupKeys(c.secret)).groupId,
       'Member id': c.memberId,
       'Device name': c.label,
       'Joined at': formatDateTime(c.createdAt),

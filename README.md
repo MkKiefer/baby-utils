@@ -96,8 +96,13 @@ scanning its QR code (or pasting the code). From then on feeds sync automaticall
 is open (every 30 s, on opening, and right after an edit).
 
 - **The group is a secret**: 256 random bits, generated on the phone. With HKDF-SHA256 each
-  phone derives from it a *group id* (the relay's mailbox address — all the server ever sees)
-  and an *AES-256-GCM key*. HKDF is one-way, so the id reveals nothing about the key.
+  phone derives from it a *relay token* (the credential for the group's mailbox, sent as
+  `Authorization: Bearer`, never in a URL) and an *AES-256-GCM key*. HKDF is one-way, so the
+  token reveals nothing about the key. The relay files the group under SHA-256(token), so its
+  state file, logs or the Debug app's *group id* are not enough to join, read, ack or kick.
+- **Abuse limits on the relay**: per client address 300 requests/min and 20 new groups/hour
+  (behind Traefik, the last `X-Forwarded-For` hop), and at most ~150 MB buffered in total.
+  Phones refuse messages that would inflate to more than 32 MB.
 - **Only the phones can read or write**: every message is encrypted and authenticated on the
   phone; the group id and the sender's member id are bound in as additional data. The relay
   cannot read, alter or re-attribute a message, and anything not sealed with the group key
@@ -113,15 +118,16 @@ is open (every 30 s, on opening, and right after an edit).
   for the phone. To remove a phone, leave on all phones and start a new group — the old secret
   is then useless. The secret and sync state live in localStorage (`sync.*`), outside backups.
 
-The relay API (`server/http.ts`), under `/api/sync/v1`:
+The relay API (`server/http.ts`), under `/api/sync/v2`; every route but `/health` needs
+`Authorization: Bearer <relay token>`:
 
 | Method | Path | |
 | --- | --- | --- |
-| `POST` | `/groups/:group/members/:member` | join / heartbeat → `{ created, members }` |
-| `DELETE` | `/groups/:group/members/:member` | leave |
-| `GET` | `/groups/:group/messages?member=` | messages still owed to this member |
-| `POST` | `/groups/:group/messages` | `{ from, to?, body }` — `body` is ciphertext |
-| `POST` | `/groups/:group/ack` | `{ member, ids }` — delivered; deleted once all have it |
+| `POST` | `/members/:member` | join / heartbeat → `{ created, members }` |
+| `DELETE` | `/members/:member` | leave |
+| `GET` | `/messages?member=` | messages still owed to this member |
+| `POST` | `/messages` | `{ from, to?, body }` — `body` is ciphertext |
+| `POST` | `/ack` | `{ member, ids }` — delivered; deleted once all have it |
 | `GET` | `/health` | counts only |
 
 ### Adding a sub-app

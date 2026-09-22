@@ -69,6 +69,8 @@ function describeError(e: unknown): string {
   if (e instanceof RelayError) {
     if (e.code === 'offline') return 'Offline'
     if (e.code === 'group_full') return 'The group is full'
+    if (e.code === 'rate_limited') return 'Too many requests to the sync server — retrying later'
+    if (e.code === 'server_buffer_full') return 'The sync server is full — try again later'
     if (e.code === 'group_buffer_full') return 'The relay is holding too much for this group — open the app on the other phones'
     if (e.status === 0) return 'Sync server not reachable'
     return `Sync server error (${e.code})`
@@ -144,7 +146,7 @@ export async function leaveGroup(): Promise<void> {
   cloud.state = emptyState()
   save()
   try {
-    await relay.leave((await groupKeys(config.secret)).groupId, config.memberId)
+    await relay.leave((await groupKeys(config.secret)).token, config.memberId)
   } catch {
     // Offline: the relay drops us after 30 days without polling anyway.
   }

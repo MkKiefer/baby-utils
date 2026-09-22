@@ -92,14 +92,14 @@ async function send(dev: Device, keys: GroupKeys, config: CloudConfig, feeds: Fe
   for (let i = 0; i === 0 || i < feeds.length; i += CHUNK) {
     const payload: SyncPayload = { v: 1, label: config.label, sentAt: now, feeds: feeds.slice(i, i + CHUNK) }
     const body = await encryptMessage(keys, config.memberId, payload)
-    if ((await dev.relay.post(keys.groupId, config.memberId, body, to)) !== null) delivered = true
+    if ((await dev.relay.post(keys.token, config.memberId, body, to)) !== null) delivered = true
   }
   return delivered
 }
 
 export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfig, state: CloudState): Promise<RoundResult> {
   const { relay } = dev
-  const g = keys.groupId
+  const g = keys.token
   const result: RoundResult = {
     at: dev.now?.() ?? Date.now(),
     received: 0,

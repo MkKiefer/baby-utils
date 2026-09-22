@@ -1,10 +1,11 @@
 /**
- * Client for the sync relay (server/http.ts). Everything sent is either a derived id or
- * ciphertext from `crypto.ts`. Same origin by default, so the CSP needs no exception.
+ * Client for the sync relay (server/http.ts). Everything sent is either a derived value or
+ * ciphertext from `crypto.ts`. The group's relay token goes in the Authorization header,
+ * never in a URL. Same origin by default, so the CSP needs no exception.
  */
 
 export const SYNC_API: string =
-  (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_SYNC_API || '/api/sync/v1'
+  (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_SYNC_API || '/api/sync/v2'
 
 export interface RelayMember {
   id: string
@@ -28,23 +29,29 @@ export class RelayError extends Error {
   }
 }
 
+/** Every group call takes the group's relay token (`GroupKeys.token`). */
 export interface RelayClient {
-  join(group: string, member: string): Promise<{ created: boolean; members: RelayMember[] }>
-  leave(group: string, member: string): Promise<void>
-  fetch(group: string, member: string): Promise<{ messages: RelayMessage[]; members: RelayMember[] }>
-  post(group: string, from: string, body: string, to?: string[]): Promise<string | null>
-  ack(group: string, member: string, ids: string[]): Promise<void>
+  join(token: string, member: string): Promise<{ created: boolean; members: RelayMember[] }>
+  leave(token: string, member: string): Promise<void>
+  fetch(token: string, member: string): Promise<{ messages: RelayMessage[]; members: RelayMember[] }>
+  post(token: string, from: string, body: string, to?: string[]): Promise<string | null>
+  ack(token: string, member: string, ids: string[]): Promise<void>
   health(): Promise<Record<string, unknown>>
 }
 
 export function relayClient(base = SYNC_API, doFetch: typeof fetch = (...a) => fetch(...a)): RelayClient {
-  async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async function call<T>(method: string, path: string, token?: string, body?: unknown): Promise<T> {
+    const headers: Record<string, string> = {}
+    if (token) headers.Authorization = `Bearer ${token}`
+    if (body !== undefined) headers['Content-Type'] = 'application/json'
     let res: Response
     try {
       res = await doFetch(base + path, {
         method,
         cache: 'no-store',
-        headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
+        headers,
         body: body === undefined ? undefined : JSON.stringify(body),
       })
     } catch (e) {
@@ -58,11 +65,11 @@ export function relayClient(base = SYNC_API, doFetch: typeof fetch = (...a) => f
   }
 
   return {
-    join: (g, m) => call('POST', `/groups/${g}/members/${m}`),
-    leave: (g, m) => call('DELETE', `/groups/${g}/members/${m}`),
-    fetch: (g, m) => call('GET', `/groups/${g}/messages?member=${m}`),
-    post: async (g, from, body, to) => (await call<{ id: string | null }>('POST', `/groups/${g}/messages`, { from, to, body })).id,
-    ack: (g, member, ids) => call('POST', `/groups/${g}/ack`, { member, ids }),
+    join: (t, m) => call('POST', `/members/${m}`, t),
+    leave: (t, m) => call('DELETE', `/members/${m}`, t),
+    fetch: (t, m) => call('GET', `/messages?member=${m}`, t),
+    post: async (t, from, body, to) => (await call<{ id: string | null }>('POST', '/messages', t, { from, to, body })).id,
+    ack: (t, member, ids) => call('POST', '/ack', t, { member, ids }),
     health: () => call('GET', '/health'),
   }
 }

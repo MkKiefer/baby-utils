@@ -39,13 +39,15 @@ export const LIMITS = {
   bodyChars: 1_500_000,
   /** Buffered body characters per group before new messages are refused. */
   groupChars: 12_000_000,
+  /** Buffered body characters across all groups, so a flood cannot exhaust memory or disk. */
+  totalChars: 150_000_000,
   membersPerGroup: 10,
   groups: 10_000,
   /** A member that has not polled for this long is dropped, so it stops holding messages. */
   memberTtlMs: 30 * 24 * 3600_000,
 }
 
-/** 32 random bytes as base64url — what the client derives from the group secret. */
+/** SHA-256 of the group's access token, base64url (see `groupIdFor` in http.ts). */
 const GROUP_ID = /^[A-Za-z0-9_-]{43}$/
 /** 16 random bytes as base64url, chosen by the device. */
 const MEMBER_ID = /^[A-Za-z0-9_-]{22}$/
@@ -96,6 +98,16 @@ export class SyncStore {
     return group.messages.reduce((n, m) => n + m.body.length, 0)
   }
 
+  private totalChars(): number {
+    let n = 0
+    for (const g of Object.values(this.state.groups)) n += this.groupChars(g)
+    return n
+  }
+
+  hasGroup(groupId: string): boolean {
+    return Object.hasOwn(this.state.groups, groupId)
+  }
+
   /**
    * Joins a group, creating it on first use. Joining again is a heartbeat.
    * `created` tells the device it was not a member before — whatever it missed is gone.
@@ -143,6 +155,7 @@ export class SyncStore {
     const pending = to ? others.filter((id) => to.includes(id)) : others
     if (!pending.length) return null
     if (this.groupChars(group) + body.length > LIMITS.groupChars) throw new SyncError(507, 'group_buffer_full')
+    if (this.totalChars() + body.length > LIMITS.totalChars) throw new SyncError(507, 'server_buffer_full')
     const id = randomBytes(12).toString('base64url')
     const now = this.now()
     group.members[from]!.seenAt = now
@@ -197,7 +210,7 @@ export class SyncStore {
       groups: groups.length,
       members: groups.reduce((n, g) => n + Object.keys(g.members).length, 0),
       messages: groups.reduce((n, g) => n + g.messages.length, 0),
-      bufferedChars: groups.reduce((n, g) => n + this.groupChars(g), 0),
+      bufferedChars: this.totalChars(),
     }
   }
 }
