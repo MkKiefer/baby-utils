@@ -235,7 +235,7 @@ async function testNotification() {
       <div v-if="rhythmOn" class="rhythm-status">
         <div>
           <span class="tiny faint">Current adjustment</span>
-          <strong class="num">{{ formatOffset(plan.offsetMin) }}</strong>
+          <strong class="num">{{ formatOffset(plan.rhythm.offsetMin) }}</strong>
         </div>
         <div>
           <span class="tiny faint">Based on</span>

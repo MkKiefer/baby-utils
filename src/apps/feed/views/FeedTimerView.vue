@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { BellOff, BellRing, ChevronRight, Moon, PauseCircle, Pencil, Sun } from 'lucide-vue-next'
 import { formatClock, formatDuration, formatOffset, formatSpan, formatDayLabel } from '@/core/time'
+import { toast } from '@/composables/useToast'
 import { notificationPermission, requestNotificationPermission } from '@/core/notify/permission'
 import { unlockAudio } from '@/core/chime'
 import { useFeedStore } from '../store'
@@ -11,6 +12,7 @@ import FeedDial from '../components/FeedDial.vue'
 import KindPicker from '../components/KindPicker.vue'
 import FeedEarlierSheet from '../components/FeedEarlierSheet.vue'
 import FeedEditSheet from '../components/FeedEditSheet.vue'
+import FeedNextIntervalSheet from '../components/FeedNextIntervalSheet.vue'
 import { KIND_LABEL, type FeedEntry, type FeedKind } from '../logic/types'
 
 const store = useFeedStore()
@@ -50,8 +52,16 @@ function edit(f: FeedEntry) {
   editOpen.value = true
 }
 
+const nextOpen = ref(false)
+async function setNextInterval(minutes: number | null) {
+  await store.setNextInterval(minutes)
+  const due = plan.value.cycles[0]?.dueAt
+  toast(minutes ? `Next feed at ${due ? formatClock(due) : '—'} · this time only` : 'Back to the normal interval', { tone: 'ok' })
+}
+
 const intervalSource = computed(() => {
   const p = plan.value
+  if (p.onceMin) return 'set once · tap to change'
   const parts = [p.interval.source === 'manual' ? 'manual' : 'by age']
   if (p.interval.jaundiceCapped) parts.push('jaundice cap')
   if (p.nightMin) parts.push(`night ${formatOffset(p.nightMin)}`)
@@ -117,13 +127,13 @@ function openNight() {
           last ? `${formatSpan(plan.now - last.at)} ago${last.kind ? ` · ${KIND_LABEL[last.kind]}` : ''}` : 'none yet'
         }}</span>
       </div>
-      <div class="fact">
-        <span class="k">Interval</span>
+      <button class="fact" :class="{ once: plan.onceMin }" :disabled="!last" title="Set the interval for the next feed only" @click="nextOpen = true">
+        <span class="k">Interval <Pencil v-if="last" :size="10" aria-hidden="true" /></span>
         <strong class="num">
           {{ formatDuration(plan.baseMin) }}<em v-if="plan.offsetMin" :class="{ neg: plan.offsetMin < 0 }">{{ formatOffset(plan.offsetMin) }}</em>
         </strong>
         <span class="h">{{ intervalSource }}</span>
-      </div>
+      </button>
       <div class="fact">
         <span class="k">Reminder</span>
         <strong class="num">{{ reminderText.value }}</strong>
@@ -181,6 +191,7 @@ function openNight() {
   </div>
 
   <FeedEarlierSheet v-model="earlierOpen" :suggested="store.suggestedKind" :initial-kind="kind" @save="fedEarlier" />
+  <FeedNextIntervalSheet v-model="nextOpen" :plan="plan" :jaundice="store.settings.jaundice.active" @save="setNextInterval" />
   <FeedEditSheet v-model="editOpen" :entry="editing" @save="saveFeed" @delete="(id) => removeFeed(id)" />
 </template>
 
@@ -228,6 +239,16 @@ function openNight() {
   border-radius: 18px;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
+}
+
+button.fact {
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.fact.once {
+  box-shadow: inset 0 0 0 2px var(--accent), var(--shadow-sm);
 }
 
 .fact .k {

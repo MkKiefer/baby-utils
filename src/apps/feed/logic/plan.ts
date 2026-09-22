@@ -1,6 +1,6 @@
 import type { PlannedNotification } from '@/core/notify/types'
 import { formatClock, formatDuration, formatOffset, MINUTE } from '@/core/time'
-import { nightExtraMin, resolveBaseInterval, type BaseInterval } from './intervals'
+import { capOnceMin, nightExtraMin, resolveBaseInterval, type BaseInterval } from './intervals'
 import { learnRhythm, type RhythmResult } from './rhythm'
 import type { FeedEntry, FeedSettings } from './types'
 
@@ -27,6 +27,10 @@ export interface FeedCycle {
   totalMin: number
   /** Night extension included in `baseMin` (0 by day). */
   nightMin: number
+  /** Rhythm offset applied to this cycle (0 when the interval was set by hand). */
+  offsetMin: number
+  /** This cycle uses the one-time interval set on the last feed. */
+  once: boolean
 }
 
 export interface FeedPlan {
@@ -39,8 +43,11 @@ export interface FeedPlan {
   baseMin: number
   /** Night extension of the current cycle (0 by day or when night mode is off). */
   nightMin: number
+  /** Rhythm offset of the current cycle; `rhythm.offsetMin` is the learned value. */
   offsetMin: number
   totalMin: number
+  /** One-time interval for the current cycle (from `lastFeed.nextIntervalMin`), else null. */
+  onceMin: number | null
   cycles: FeedCycle[]
   status: FeedStatus
   /** Cycles whose due time passed without a logged feed. */
@@ -66,13 +73,15 @@ export function computeFeedPlan({ feeds, settings, ageDays, now }: FeedPlanInput
   const lastFeed = sorted[sorted.length - 1] ?? null
   const interval = resolveBaseInterval(settings, ageDays)
   const rhythm = learnRhythm(sorted, settings, interval.baseMin, now)
-  const offsetMin = rhythm.offsetMin
-  const cycleAt = (startAt: number) => {
+  const onceMin = lastFeed?.nextIntervalMin ? capOnceMin(lastFeed.nextIntervalMin, settings) : null
+  const cycleAt = (startAt: number, once: number | null = null) => {
+    if (once) return { baseMin: once, nightMin: 0, offsetMin: 0, totalMin: once, once: true }
     const nightMin = nightExtraMin(settings, startAt)
     const baseMin = interval.baseMin + nightMin
-    return { baseMin, nightMin, totalMin: Math.max(30, baseMin + offsetMin) }
+    const offsetMin = rhythm.offsetMin
+    return { baseMin, nightMin, offsetMin, totalMin: Math.max(30, baseMin + offsetMin), once: false }
   }
-  const { baseMin, nightMin, totalMin } = cycleAt(lastFeed?.at ?? now)
+  const { baseMin, nightMin, offsetMin, totalMin } = cycleAt(lastFeed?.at ?? now, onceMin)
   const remindersEnabled = settings.maxUnconfirmed > 0
 
   const plan: FeedPlan = {
@@ -85,6 +94,7 @@ export function computeFeedPlan({ feeds, settings, ageDays, now }: FeedPlanInput
     nightMin,
     offsetMin,
     totalMin,
+    onceMin,
     cycles: [],
     status: 'empty',
     unanswered: 0,
@@ -97,7 +107,8 @@ export function computeFeedPlan({ feeds, settings, ageDays, now }: FeedPlanInput
   const cycleCount = Math.max(1, settings.maxUnconfirmed)
   let startAt = lastFeed.at
   for (let i = 0; i < cycleCount; i++) {
-    const c = cycleAt(startAt)
+    // The one-time interval covers only the first cycle; later ones fall back to the plan.
+    const c = cycleAt(startAt, i === 0 ? onceMin : null)
     const dueAt = startAt + c.totalMin * MINUTE
     plan.cycles.push({ index: i + 1, startAt, baseAt: startAt + c.baseMin * MINUTE, dueAt, ...c })
     startAt = dueAt
@@ -121,7 +132,6 @@ export function computeFeedPlan({ feeds, settings, ageDays, now }: FeedPlanInput
 }
 
 function buildNotifications(plan: FeedPlan, lastFeed: FeedEntry, settings: FeedSettings): PlannedNotification[] {
-  const { offsetMin } = plan
   const lastClock = formatClock(lastFeed.at)
   const out: PlannedNotification[] = []
   const common = {
@@ -131,16 +141,18 @@ function buildNotifications(plan: FeedPlan, lastFeed: FeedEntry, settings: FeedS
     actions: [{ action: FED_ACTION, title: 'Fed now' }],
   }
   // Editing the last feed's time must re-arm reminders, so the time is part of the id.
-  const idBase = `feed:${lastFeed.id}@${lastFeed.at}`
+  // Same for setting or clearing the one-time interval.
+  const idBase = `feed:${lastFeed.id}@${lastFeed.at}${plan.onceMin ? `+${plan.onceMin}` : ''}`
 
   for (const cycle of plan.cycles) {
     const isFirst = cycle.index === 1
     const isLast = cycle.index === plan.cycles.length
     const quietNote = isLast ? ' Reminders pause until the next feed is logged.' : ''
-    const { baseMin, totalMin, nightMin } = cycle
+    const { baseMin, totalMin, nightMin, offsetMin } = cycle
     const nightText = nightMin ? `, incl. ${formatOffset(nightMin)} at night` : ''
-    const intervalText =
-      (offsetMin ? `${formatDuration(baseMin)} ${formatOffset(offsetMin)}` : formatDuration(baseMin)) + nightText
+    const intervalText = cycle.once
+      ? `${formatDuration(baseMin)}, set once`
+      : (offsetMin ? `${formatDuration(baseMin)} ${formatOffset(offsetMin)}` : formatDuration(baseMin)) + nightText
 
     if (offsetMin > 0 && settings.notifyAtBase) {
       out.push({

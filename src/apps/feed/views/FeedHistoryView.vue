@@ -28,7 +28,7 @@ const rows = computed<Row[]>(() => {
     const prev = feeds[i - 1]
     if (!prev) return { f, gapMin: null, deltaMin: null }
     const gapMin = (f.at - prev.at) / MINUTE
-    const planned = prev.plan?.baseMin || null
+    const planned = prev.nextIntervalMin || prev.plan?.baseMin || null
     const plausible = planned && gapMin <= planned * GAP_RATIO
     return { f, gapMin, deltaMin: plausible ? Math.round(gapMin - planned) : null }
   })

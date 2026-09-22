@@ -71,7 +71,9 @@ function remove() {
       <p class="tiny faint">
         <Bell v-if="entry.source === 'notification'" :size="12" /> Logged {{ formatDateTime(entry.createdAt) }}
         {{ entry.source === 'notification' ? 'from a notification' : '' }} · planned next
-        {{ formatDuration(entry.plan.baseMin) }}{{ entry.plan.offsetMin ? ` ${formatOffset(entry.plan.offsetMin)}` : '' }}
+        {{ formatDuration(entry.plan.baseMin) }}{{ entry.plan.offsetMin ? ` ${formatOffset(entry.plan.offsetMin)}` : '' }}{{
+          entry.nextIntervalMin ? ` · set once to ${formatDuration(entry.nextIntervalMin)}` : ''
+        }}
       </p>
       <button class="btn primary block lg" @click="save">Save</button>
       <ConfirmButton label="Delete feed" confirm-label="Tap again to delete" class="block" @confirm="remove">

@@ -20,6 +20,12 @@ export interface FeedEntry {
   deletedAt?: number
   /** Interval that applied *after* this feed, snapshotted when it was logged. */
   plan: { baseMin: number; offsetMin: number }
+  /**
+   * One-time interval (start-to-start minutes) for the feed after this one, set by hand.
+   * Replaces age, night and rhythm for that single cycle only; the next logged feed
+   * goes back to the normal plan. Lives on the entry so it syncs with it.
+   */
+  nextIntervalMin?: number
 }
 
 export interface FeedSettings {

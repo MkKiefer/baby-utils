@@ -194,3 +194,42 @@ describe('night interval', () => {
     expect(j.totalMin).toBe(120)
   })
 })
+
+describe('one-time interval', () => {
+  const once = (at: number, min: number, i = 0): FeedEntry => ({ ...feed(at, 150, i), nextIntervalMin: min })
+
+  it('replaces rhythm and night for the next cycle only', () => {
+    const feeds = [...series([180, 180]).slice(0, -1), once(T0 + 360 * MIN, 90, 9)]
+    const p = computeFeedPlan({ feeds, settings: settings(), ageDays: 3, now: T0 + 360 * MIN })
+    expect(p.onceMin).toBe(90)
+    expect(p).toMatchObject({ baseMin: 90, offsetMin: 0, totalMin: 90 })
+    expect(p.cycles.map((c) => [c.once, (c.dueAt - c.startAt) / MIN])).toEqual([
+      [true, 90],
+      [false, 150 + p.rhythm.offsetMin],
+    ])
+    expect(p.notifications.some((n) => n.kind === 'base' && n.at < p.cycles[0].dueAt)).toBe(false)
+  })
+
+  it('stops applying once the next feed is logged', () => {
+    const feeds = [once(T0, 60), feed(T0 + 60 * MIN, 150, 1)]
+    const p = computeFeedPlan({ feeds, settings: settings(), ageDays: 3, now: T0 + 60 * MIN })
+    expect(p.onceMin).toBeNull()
+    expect(p.totalMin).toBe(150)
+  })
+
+  it('is capped with jaundice and re-arms reminders when changed', () => {
+    const s = settings({ jaundice: { active: true, since: T0 } })
+    const p = computeFeedPlan({ feeds: [once(T0, 240)], settings: s, ageDays: 3, now: T0 })
+    expect(p.totalMin).toBe(120)
+    const q = computeFeedPlan({ feeds: [once(T0, 100)], settings: s, ageDays: 3, now: T0 })
+    expect(q.notifications[0].id).not.toBe(p.notifications[0].id)
+  })
+
+  it('is left out of rhythm learning', () => {
+    const feeds = series([150, 150, 150, 150], 120)
+    feeds[1] = { ...feeds[1], nextIntervalMin: 150 }
+    const r = learnRhythm(feeds, settings(), 120, feeds[4].at)
+    expect(r.samples.find((x) => x.fromAt === feeds[1].at)?.excluded).toBe('override')
+    expect(r.usedCount).toBe(3)
+  })
+})

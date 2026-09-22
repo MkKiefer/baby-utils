@@ -31,6 +31,7 @@ const summary = computed(() => {
     nightMin: p.nightMin,
     night: store.settings.night,
     offsetMin: p.offsetMin,
+    onceMin: p.onceMin,
     totalMin: p.totalMin,
     unanswered: p.unanswered,
     remindersEnabled: p.remindersEnabled,
@@ -81,7 +82,7 @@ const summary = computed(() => {
         <th>Cycle {{ c.index }}</th>
         <td>start {{ formatClock(c.startAt) }} · age {{ formatClock(c.baseAt) }} · due {{ formatClock(c.dueAt) }}{{
           c.nightMin ? ` · night ${formatOffset(c.nightMin)}` : ''
-        }}</td>
+        }}{{ c.once ? ` · set once ${formatDuration(c.totalMin)}` : '' }}</td>
       </tr>
     </tbody>
   </table>

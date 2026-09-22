@@ -78,6 +78,14 @@ export const useFeedStore = defineStore('feed', () => {
     emitChange('feeds')
   }
 
+  /** Sets (or clears, with null) the one-time interval after the latest feed. */
+  async function setNextInterval(minutes: number | null) {
+    const last = feeds.value[feeds.value.length - 1]
+    if (!last) return
+    const { nextIntervalMin: _prev, ...rest } = last
+    await update(minutes ? { ...rest, nextIntervalMin: minutes } : rest)
+  }
+
   async function remove(id: string) {
     const entry = feeds.value.find((f) => f.id === id)
     await deleteFeed(await getDB(), id)
@@ -116,6 +124,7 @@ export const useFeedStore = defineStore('feed', () => {
     ensureLoaded,
     log,
     update,
+    setNextInterval,
     remove,
     restore,
     saveSettings,

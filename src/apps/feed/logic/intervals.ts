@@ -16,6 +16,15 @@ export const AGE_INTERVALS = [
 export const JAUNDICE_MAX_MIN = 120
 export const MANUAL_MIN = 60
 export const MANUAL_MAX = 300
+/** Range of the one-time "next feed in" interval. */
+export const ONCE_MIN = 30
+export const ONCE_MAX = 360
+
+/** A one-time interval, capped like any other interval while jaundice is active. */
+export function capOnceMin(minutes: number, settings: FeedSettings): number {
+  const max = settings.jaundice.active ? JAUNDICE_MAX_MIN : ONCE_MAX
+  return Math.max(ONCE_MIN, Math.min(max, Math.round(minutes)))
+}
 
 export function ageIntervalMin(ageDays: number): number {
   return (AGE_INTERVALS.find((r) => ageDays <= r.toDay) ?? AGE_INTERVALS[AGE_INTERVALS.length - 1]).minutes

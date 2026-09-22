@@ -21,7 +21,7 @@ export interface RhythmSample {
   plannedMin: number
   deltaMin: number
   used: boolean
-  excluded?: 'gap' | 'cluster' | 'surplus'
+  excluded?: 'gap' | 'cluster' | 'override' | 'surplus'
 }
 
 export interface RhythmResult {
@@ -80,7 +80,9 @@ export function learnRhythm(
       deltaMin: actualMin - plannedMin,
       used: false,
     }
-    if (actualMin > plannedMin * GAP_RATIO) sample.excluded = 'gap'
+    // A hand-set interval says nothing about the baby's own rhythm.
+    if (from.nextIntervalMin) sample.excluded = 'override'
+    else if (actualMin > plannedMin * GAP_RATIO) sample.excluded = 'gap'
     else if (actualMin < plannedMin * CLUSTER_RATIO) sample.excluded = 'cluster'
     else if (used >= RHYTHM_MAX_SAMPLES) sample.excluded = 'surplus'
     else {
