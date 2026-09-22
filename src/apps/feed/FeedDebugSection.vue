@@ -1,0 +1,82 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import JsonView from '@/apps/debug/components/JsonView.vue'
+import { formatClock, formatDuration, formatOffset } from '@/core/time'
+import { useFeedStore } from './store'
+
+/** Feed timer internals: interval resolution, rhythm samples, reminder cycles. */
+const store = useFeedStore()
+void store.ensureLoaded()
+
+const plan = computed(() => store.plan)
+const summary = computed(() => {
+  const p = plan.value
+  return {
+    status: p.status,
+    ageDays: p.ageDays,
+    interval: p.interval,
+    offsetMin: p.offsetMin,
+    totalMin: p.totalMin,
+    unanswered: p.unanswered,
+    remindersEnabled: p.remindersEnabled,
+    lastFeed: p.lastFeed,
+    rhythm: { state: p.rhythm.state, medianMin: p.rhythm.medianMin, bounds: p.rhythm.bounds, usedCount: p.rhythm.usedCount },
+  }
+})
+</script>
+
+<template>
+  <table>
+    <tr>
+      <th>Status</th>
+      <td>
+        <b>{{ plan.status }}</b>
+      </td>
+    </tr>
+    <tr>
+      <th>Interval</th>
+      <td>
+        {{ formatDuration(plan.baseMin) }} ({{ plan.interval.source }}, age table {{ formatDuration(plan.interval.ageMin) }}{{
+          plan.interval.jaundiceCapped ? ', jaundice cap' : ''
+        }}) {{ formatOffset(plan.offsetMin) }} rhythm = {{ formatDuration(plan.totalMin) }}
+      </td>
+    </tr>
+    <tr>
+      <th>Feeds in store</th>
+      <td>{{ store.feeds.length }}</td>
+    </tr>
+  </table>
+
+  <strong class="small">Reminder cycles</strong>
+  <table>
+    <tr v-for="c in plan.cycles" :key="c.index">
+      <th>Cycle {{ c.index }}</th>
+      <td>start {{ formatClock(c.startAt) }} · age {{ formatClock(c.baseAt) }} · due {{ formatClock(c.dueAt) }}</td>
+    </tr>
+  </table>
+
+  <strong class="small">Rhythm samples (newest first)</strong>
+  <table>
+    <tr>
+      <th style="width: auto">Interval</th>
+      <th style="width: auto">Actual</th>
+      <th style="width: auto">Planned</th>
+      <th style="width: auto">Δ</th>
+      <th style="width: auto">Used</th>
+    </tr>
+    <tr v-for="s in plan.rhythm.samples" :key="s.toAt">
+      <td>{{ formatClock(s.fromAt) }}→{{ formatClock(s.toAt) }}</td>
+      <td>{{ formatDuration(s.actualMin) }}</td>
+      <td>{{ formatDuration(s.plannedMin) }}</td>
+      <td>{{ formatOffset(Math.round(s.deltaMin)) }}</td>
+      <td>{{ s.used ? 'yes' : s.excluded }}</td>
+    </tr>
+  </table>
+
+  <strong class="small">Planned notifications</strong>
+  <JsonView :value="plan.notifications" />
+  <strong class="small">Plan summary</strong>
+  <JsonView :value="summary" />
+  <strong class="small">Settings (kv: feed.settings)</strong>
+  <JsonView :value="store.settings" />
+</template>
