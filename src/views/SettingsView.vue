@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import { Bug, ChevronRight, Download, Smartphone, Upload } from 'lucide-vue-next'
+import { Bug, ChevronRight, Download, QrCode, Smartphone, Upload } from 'lucide-vue-next'
 import AppBar from '@/components/AppBar.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
 import ConfirmButton from '@/components/ConfirmButton.vue'
@@ -157,6 +157,15 @@ onMounted(refreshStorage)
             Protect
           </button>
         </div>
+        <RouterLink to="/sync" class="list-item" style="text-decoration: none">
+          <QrCode :size="20" />
+          <span class="grow"
+            ><strong>Sync with nearby phone</strong><br /><span class="small muted"
+              >Scan a code on the other phone · no internet needed</span
+            ></span
+          >
+          <ChevronRight :size="18" class="faint" />
+        </RouterLink>
         <button class="list-item" @click="doExport">
           <Download :size="20" />
           <span class="grow"><strong>Export backup</strong><br /><span class="small muted">JSON file with all data</span></span>

@@ -137,110 +137,113 @@ function done() {
 </script>
 
 <template>
-  <AppBar title="Sync nearby" back="/settings" />
-  <div class="page stack">
-    <!-- ---------------------------------------------------------------- start -->
-    <template v-if="step === 'start'">
-      <div class="callout info">
-        <ArrowLeftRight :size="20" />
-        <p>
-          Open this screen on <strong>both phones</strong>. One shows its code, the other scans it — then swap. Feeds,
-          edits and deletions are merged; settings stay on each phone.
+  <div>
+    <!-- Single root required: App.vue's <Transition mode="out-in"> can't leave a multi-root view (blank screen). -->
+    <AppBar title="Sync nearby" back="/settings" />
+    <div class="page stack">
+      <!-- ---------------------------------------------------------------- start -->
+      <template v-if="step === 'start'">
+        <div class="callout info">
+          <ArrowLeftRight :size="20" />
+          <p>
+            Open this screen on <strong>both phones</strong>. One shows its code, the other scans it — then swap. Feeds,
+            edits and deletions are merged; settings stay on each phone.
+          </p>
+        </div>
+
+        <h2 class="section-title">What to send</h2>
+        <SegmentedControl
+          v-model="scope"
+          label="What to send"
+          :options="[
+            { value: 'recent', label: 'Last 2 weeks' },
+            { value: 'all', label: 'Everything' },
+          ]"
+        />
+        <p class="tiny faint hint">
+          Use <b>Everything</b> the first time. Afterwards, recent changes are enough as long as you sync at least every
+          two weeks.
         </p>
-      </div>
 
-      <h2 class="section-title">What to send</h2>
-      <SegmentedControl
-        v-model="scope"
-        label="What to send"
-        :options="[
-          { value: 'recent', label: 'Last 2 weeks' },
-          { value: 'all', label: 'Everything' },
-        ]"
-      />
-      <p class="tiny faint hint">
-        Use <b>Everything</b> the first time. Afterwards, recent changes are enough as long as you sync at least every
-        two weeks.
-      </p>
-
-      <button class="btn primary block lg" @click="show"><QrIcon :size="22" /> Show my code</button>
-      <button class="btn block lg" :disabled="!cameraSupported" @click="scan"><ScanLine :size="22" /> Scan other phone</button>
-      <p v-if="!cameraSupported" class="tiny faint hint">This browser has no camera access, so it can only show codes.</p>
-    </template>
-
-    <!-- ---------------------------------------------------------------- show -->
-    <template v-else-if="step === 'show'">
-      <p class="small muted center">Hold this screen in front of the other phone's camera.</p>
-      <div class="card qr-card">
-        <QrCode v-if="offer" :value="offer.frames[frame]" />
-        <div v-else class="qr-placeholder" />
-      </div>
-      <p v-if="offer" class="tiny faint center num">
-        {{ offer.entries }} {{ offer.entries === 1 ? 'feed' : 'feeds' }} · code {{ frame + 1 }}/{{ offer.frames.length }} ·
-        loops every {{ loopSeconds }} s
-      </p>
-      <SegmentedControl
-        v-model="scope"
-        label="What to send"
-        :options="[
-          { value: 'recent', label: 'Last 2 weeks' },
-          { value: 'all', label: 'Everything' },
-        ]"
-      />
-      <button v-if="!didScan" class="btn primary block lg" @click="scan">
-        <ScanLine :size="22" /> Next: scan their code
-      </button>
-      <button v-else class="btn primary block lg" @click="done"><CircleCheck :size="22" /> Done</button>
-    </template>
-
-    <!-- ---------------------------------------------------------------- scan -->
-    <template v-else-if="step === 'scan'">
-      <p class="small muted center">Point the camera at the code on the other phone.</p>
-      <div class="viewfinder">
-        <video ref="video" playsinline muted />
-        <div class="frame" />
-      </div>
-      <div class="bar" role="progressbar" :aria-valuenow="percent" aria-valuemin="0" aria-valuemax="100">
-        <span :style="{ width: `${percent}%` }" />
-      </div>
-      <p class="tiny faint center num">
-        <template v-if="merging">Merging…</template>
-        <template v-else-if="progress.total">{{ progress.received }} / {{ progress.total }} codes read</template>
-        <template v-else-if="scannerState.camera === 'starting'">Starting camera…</template>
-        <template v-else>Waiting for a code…</template>
-      </p>
-      <div v-if="scanError" class="callout warn">
-        <p>{{ scanError }}</p>
-      </div>
-      <button v-if="scanError" class="btn block" @click="scan">Try again</button>
-      <button class="btn ghost block" @click="leaveScan">
-        {{ didShow ? 'Back to my code' : 'Cancel' }}
-      </button>
-    </template>
-
-    <!-- ---------------------------------------------------------------- result -->
-    <template v-else-if="step === 'result' && result">
-      <div class="card stack center result">
-        <CircleCheck :size="48" class="ok" />
-        <strong>{{ describeMerge(result) }}</strong>
-        <p class="small muted">
-          {{
-            changedCount(result)
-              ? 'The other phone’s feeds are now on this one.'
-              : 'This phone already had everything the other one sent.'
-          }}
-        </p>
-      </div>
-      <template v-if="!didShow">
-        <p class="small muted center">Now let the other phone scan this one, so it gets your feeds too.</p>
         <button class="btn primary block lg" @click="show"><QrIcon :size="22" /> Show my code</button>
+        <button class="btn block lg" :disabled="!cameraSupported" @click="scan"><ScanLine :size="22" /> Scan other phone</button>
+        <p v-if="!cameraSupported" class="tiny faint hint">This browser has no camera access, so it can only show codes.</p>
       </template>
-      <template v-else>
-        <p class="small muted center">Both phones are in sync.</p>
-        <button class="btn primary block lg" @click="done">Done</button>
+
+      <!-- ---------------------------------------------------------------- show -->
+      <template v-else-if="step === 'show'">
+        <p class="small muted center">Hold this screen in front of the other phone's camera.</p>
+        <div class="card qr-card">
+          <QrCode v-if="offer" :value="offer.frames[frame]" />
+          <div v-else class="qr-placeholder" />
+        </div>
+        <p v-if="offer" class="tiny faint center num">
+          {{ offer.entries }} {{ offer.entries === 1 ? 'feed' : 'feeds' }} · code {{ frame + 1 }}/{{ offer.frames.length }} ·
+          loops every {{ loopSeconds }} s
+        </p>
+        <SegmentedControl
+          v-model="scope"
+          label="What to send"
+          :options="[
+            { value: 'recent', label: 'Last 2 weeks' },
+            { value: 'all', label: 'Everything' },
+          ]"
+        />
+        <button v-if="!didScan" class="btn primary block lg" @click="scan">
+          <ScanLine :size="22" /> Next: scan their code
+        </button>
+        <button v-else class="btn primary block lg" @click="done"><CircleCheck :size="22" /> Done</button>
       </template>
-      <button class="btn ghost block" @click="scan">Scan again</button>
-    </template>
+
+      <!-- ---------------------------------------------------------------- scan -->
+      <template v-else-if="step === 'scan'">
+        <p class="small muted center">Point the camera at the code on the other phone.</p>
+        <div class="viewfinder">
+          <video ref="video" playsinline muted />
+          <div class="frame" />
+        </div>
+        <div class="bar" role="progressbar" :aria-valuenow="percent" aria-valuemin="0" aria-valuemax="100">
+          <span :style="{ width: `${percent}%` }" />
+        </div>
+        <p class="tiny faint center num">
+          <template v-if="merging">Merging…</template>
+          <template v-else-if="progress.total">{{ progress.received }} / {{ progress.total }} codes read</template>
+          <template v-else-if="scannerState.camera === 'starting'">Starting camera…</template>
+          <template v-else>Waiting for a code…</template>
+        </p>
+        <div v-if="scanError" class="callout warn">
+          <p>{{ scanError }}</p>
+        </div>
+        <button v-if="scanError" class="btn block" @click="scan">Try again</button>
+        <button class="btn ghost block" @click="leaveScan">
+          {{ didShow ? 'Back to my code' : 'Cancel' }}
+        </button>
+      </template>
+
+      <!-- ---------------------------------------------------------------- result -->
+      <template v-else-if="step === 'result' && result">
+        <div class="card stack center result">
+          <CircleCheck :size="48" class="ok" />
+          <strong>{{ describeMerge(result) }}</strong>
+          <p class="small muted">
+            {{
+              changedCount(result)
+                ? 'The other phone’s feeds are now on this one.'
+                : 'This phone already had everything the other one sent.'
+            }}
+          </p>
+        </div>
+        <template v-if="!didShow">
+          <p class="small muted center">Now let the other phone scan this one, so it gets your feeds too.</p>
+          <button class="btn primary block lg" @click="show"><QrIcon :size="22" /> Show my code</button>
+        </template>
+        <template v-else>
+          <p class="small muted center">Both phones are in sync.</p>
+          <button class="btn primary block lg" @click="done">Done</button>
+        </template>
+        <button class="btn ghost block" @click="scan">Scan again</button>
+      </template>
+    </div>
   </div>
 </template>
 
