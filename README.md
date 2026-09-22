@@ -26,6 +26,39 @@ npm test           # unit tests (age, intervals, rhythm, schedule, notification 
 The app shows an install screen unless it runs as an installed PWA. On `localhost` (and in
 dev builds) a "Continue in the browser (developer)" link skips it for the session.
 
+## Deploying with Docker
+
+The `Dockerfile` builds locally in two stages: Node 24 runs the tests, the type-check and the
+Vite build, and the static result is served by unprivileged nginx (non-root, read-only
+filesystem) on port 8080.
+
+```bash
+cp .env.example .env               # optional: WEB_PORT, DOMAIN
+docker compose up -d --build       # → http://localhost:8080
+```
+
+**Phones need HTTPS.** Service workers, installation and notifications only work in a secure
+context; `localhost` is the only exception. Pick one:
+
+- **Built-in HTTPS:** set `DOMAIN` in `.env` to a hostname whose DNS points at this server
+  (ports 80 and 443 reachable) and run `docker compose --profile https up -d --build`. Caddy
+  obtains and renews a Let's Encrypt certificate and adds HSTS. Set
+  `WEB_PORT=127.0.0.1:8080` so the plain-HTTP port is not exposed.
+- **Your own reverse proxy** (Traefik, nginx, Caddy, …): terminate TLS there and proxy to the
+  `web` container on port 8080.
+
+`deploy/nginx.conf` takes care of what a PWA needs from the server:
+
+- `index.html`, `sw.js`, the manifest and icons are sent `no-cache`, so a new deploy is picked
+  up (the in-app "Update available" banner); hashed `/assets/*` are cached for a year.
+- Deep links (`/app/feed/history`) get the SPA shell; missing chunks return 404.
+- `application/manifest+json`, gzip, a strict Content-Security-Policy and security headers.
+- `/healthz` for the container health check.
+
+To update: `git pull && docker compose up -d --build`. The container is stateless — all data
+lives on the devices, so there is nothing to back up on the server (Caddy keeps its
+certificates in the `caddy-data` volume).
+
 ## How it's built
 
 ```

@@ -1,0 +1,6 @@
+# HTTPS front for the `https` compose profile. With a public DOMAIN pointing at this host
+# (ports 80 + 443 reachable), Caddy fetches and renews a Let's Encrypt certificate itself.
+{$DOMAIN} {
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy web:8080
+}
