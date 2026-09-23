@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { BellRing, ChevronDown, Download, HardDrive, Smartphone, TriangleAlert, WifiOff } from 'lucide-vue-next'
+import { BellRing, ChevronDown, Download, ExternalLink, HardDrive, Smartphone, TriangleAlert, WifiOff } from 'lucide-vue-next'
 import { canBypassInstall, detectPlatform, setInstallBypass } from '@/core/platform'
 import { installState, promptInstall } from '@/core/pwa'
-import { guideFor, INSTALL_GUIDES } from './installGuides'
+import { chromeIntentUrl, guideFor, INSTALL_GUIDES } from './installGuides'
 
 const emit = defineEmits<{ bypass: [] }>()
 
@@ -11,6 +11,9 @@ const platform = detectPlatform()
 const detected = guideFor(platform)
 const others = computed(() => INSTALL_GUIDES.filter((g) => g.id !== detected?.id))
 const openGuide = ref<string | null>(null)
+// Installing from an unsupported browser (e.g. Samsung Internet) yields an app Android blocks.
+const canPrompt = computed(() => installState.canPrompt && !detected?.unsupported)
+const chromeUrl = chromeIntentUrl(new URL(location.href))
 
 function bypass() {
   setInstallBypass(true)
@@ -37,7 +40,7 @@ function bypass() {
       <div><strong>Installed!</strong> Open Baby Utils from your home screen or app list to continue.</div>
     </div>
 
-    <button v-else-if="installState.canPrompt" class="btn primary block lg" @click="promptInstall">
+    <button v-else-if="canPrompt" class="btn primary block lg" @click="promptInstall">
       <Download :size="22" /> Install app
     </button>
 
@@ -50,6 +53,7 @@ function bypass() {
       <ol>
         <li v-for="(s, i) in detected.steps" :key="i">{{ s }}</li>
       </ol>
+      <a v-if="detected.openInChrome" class="btn primary block open-chrome" :href="chromeUrl"><ExternalLink :size="20" /> Open in Chrome</a>
       <p v-if="detected.note" class="tiny muted">{{ detected.note }}</p>
     </section>
 
@@ -180,6 +184,11 @@ li::marker {
 
 .chev.open {
   transform: rotate(180deg);
+}
+
+.open-chrome {
+  margin: 4px 0 8px;
+  text-decoration: none;
 }
 
 .bypass {

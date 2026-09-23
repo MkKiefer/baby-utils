@@ -7,6 +7,8 @@ export interface InstallGuide {
   note?: string
   /** Browser cannot install: show as a warning. */
   unsupported?: boolean
+  /** Offer a button that reopens this page in Chrome (Android only). */
+  openInChrome?: boolean
   match: (p: PlatformInfo) => boolean
 }
 
@@ -58,9 +60,19 @@ export const INSTALL_GUIDES: InstallGuide[] = [
     match: (p) => p.os === 'android' && (p.browser === 'chrome' || p.browser === 'edge' || p.browser === 'opera' || p.browser === 'other'),
   },
   {
+    // Samsung's WebAPK server builds apps for an outdated Android version, so Android 14+ /
+    // Play Protect block the install ("built for an older version of Android … privacy
+    // protections"). Chrome's WebAPKs are current, so install from Chrome instead.
     id: 'android-samsung',
     title: 'Android · Samsung Internet',
-    steps: ['Tap the ☰ menu at the bottom right.', 'Tap “Add page to”, then “Home screen”.', 'Open Baby Utils from your home screen.'],
+    unsupported: true,
+    openInChrome: true,
+    steps: [
+      'Samsung Internet installs web apps in a way newer Android versions block (“built for an older version of Android”).',
+      'Tap “Open in Chrome” below (or open this address in Chrome yourself).',
+      'In Chrome, tap the ⋮ menu → “Add to Home screen” → “Install”.',
+    ],
+    note: 'Already added from Samsung Internet? Remove that home screen icon first.',
     match: (p) => p.os === 'android' && p.browser === 'samsung',
   },
   {
@@ -96,4 +108,11 @@ export const INSTALL_GUIDES: InstallGuide[] = [
 
 export function guideFor(p: PlatformInfo): InstallGuide | undefined {
   return INSTALL_GUIDES.find((g) => g.match(p))
+}
+
+/** Android intent link that opens `url` in Chrome, or Chrome's Play Store page if it is missing. */
+export function chromeIntentUrl(url: URL): string {
+  const fallback = encodeURIComponent('https://play.google.com/store/apps/details?id=com.android.chrome')
+  const scheme = url.protocol.replace(':', '')
+  return `intent://${url.host}${url.pathname}${url.search}#Intent;scheme=${scheme};package=com.android.chrome;S.browser_fallback_url=${fallback};end`
 }
