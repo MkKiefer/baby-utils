@@ -298,7 +298,10 @@ async function leave() {
                 <template v-if="!cloud.config.enabled">Paused — nothing is sent or received.</template>
                 <template v-else-if="cloud.syncing">Syncing…</template>
                 <template v-else-if="cloud.state.lastError">{{ cloud.state.lastError }}</template>
-                <template v-else-if="cloud.state.lastSyncAt">Last synced {{ formatDateTime(cloud.state.lastSyncAt) }}</template>
+                <template v-else-if="cloud.state.lastSyncAt">
+                  Last synced {{ formatDateTime(cloud.state.lastSyncAt) }}
+                  <template v-if="cloud.stream.status === 'open'"> · live</template>
+                </template>
                 <template v-else>Not synced yet</template>
               </p>
             </div>
@@ -306,7 +309,10 @@ async function leave() {
           </div>
           <button class="list-item" :disabled="!cloud.config.enabled || cloud.syncing" @click="run(syncNow, 'Synced')">
             <RefreshCw :size="20" :class="{ spin: cloud.syncing }" />
-            <span class="grow"><strong>Sync now</strong></span>
+            <span class="grow">
+              <strong>Sync now</strong>
+              <span class="small muted" style="display: block">Or pull down at the top of any page</span>
+            </span>
           </button>
         </div>
 

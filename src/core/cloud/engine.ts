@@ -2,7 +2,7 @@ import type { FeedEntry } from '@/apps/feed/logic/types'
 import type { WeightEntry } from '@/apps/weight/logic/types'
 import type { IncomingRecords, MergeStats } from '../merge'
 import { countFields, foldDocs, type SyncedDocs } from '../settingsSync'
-import type { RelayClient } from './api'
+import { RelayError, type RelayClient, type RelayMember, type RelayMessage } from './api'
 import { decryptMessage, encryptMessage, newMemberId, type GroupKeys } from './crypto'
 
 /**
@@ -12,8 +12,10 @@ import { decryptMessage, encryptMessage, newMemberId, type GroupKeys } from './c
  * weighings) the group already has —
  * because this device sent it, or because it arrived from the group. A round then:
  *
- *   1. joins the group (a heartbeat; also tells us if the relay had dropped us),
- *   2. fetches, decrypts and merges what is owed to us, then acknowledges it,
+ *   1. joins the group — only when not joined yet or when the relay has dropped us; otherwise
+ *      the fetch is the heartbeat, which saves a request per round,
+ *   2. fetches, decrypts and merges what is owed to us, then acknowledges it (in parallel
+ *      with the sending below),
  *   3. sends every entry whose version the group does not have yet,
  *   4. sends the whole log to members that joined since the last round, so a new phone
  *      gets the history the relay never buffered for it.
@@ -199,21 +201,33 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
     rejoined: false,
   }
 
-  // 1. Join / heartbeat.
-  let { created } = await relay.join(g, config.memberId)
-  if (created && state.joined) {
-    // The relay forgot us: what it buffered meanwhile is gone. Come back as a new member,
-    // so the others notice and send their whole log, and resend ours.
-    config.memberId = newMemberId()
-    created = (await relay.join(g, config.memberId)).created
-    Object.assign(state, { known: {}, knownDocs: {}, members: [] })
-    result.rejoined = true
+  // 1. Join, unless the fetch (a heartbeat too) finds us still in the group.
+  let created = false
+  let owed: { messages: RelayMessage[]; members: RelayMember[] } | null = null
+  if (state.joined) {
+    try {
+      owed = await relay.fetch(g, config.memberId)
+    } catch (e) {
+      if (!(e instanceof RelayError && e.code === 'member_unknown')) throw e
+    }
   }
-  if (created) Object.assign(state, { known: {}, knownDocs: {} })
-  state.joined = true
+  if (!owed) {
+    created = (await relay.join(g, config.memberId)).created
+    if (created && state.joined) {
+      // The relay forgot us: what it buffered meanwhile is gone. Come back as a new member,
+      // so the others notice and send their whole log, and resend ours.
+      config.memberId = newMemberId()
+      created = (await relay.join(g, config.memberId)).created
+      Object.assign(state, { known: {}, knownDocs: {}, members: [] })
+      result.rejoined = true
+    }
+    if (created) Object.assign(state, { known: {}, knownDocs: {} })
+    state.joined = true
+    owed = await relay.fetch(g, config.memberId)
+  }
 
   // 2. Receive.
-  const { messages, members } = await relay.fetch(g, config.memberId)
+  const { messages, members } = owed
   const incoming = { feeds: [] as FeedEntry[], weights: [] as WeightEntry[] }
   const incomingDocs: unknown[] = []
   let latest = 0
@@ -235,7 +249,9 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
   const docsIn = foldDocs(incomingDocs)
   if (countFields(docsIn)) result.settingsMerged = await dev.mergeDocs(docsIn)
   // Rejected ones too: they will never decrypt, and would otherwise be held forever.
-  if (messages.length) await relay.ack(g, config.memberId, messages.map((m) => m.id))
+  const acked = messages.length ? relay.ack(g, config.memberId, messages.map((m) => m.id)) : Promise.resolve()
+  // Awaited at the end; until then an unhandled rejection must not escape.
+  acked.catch(() => {})
 
   // What arrived and survived the merge is known to the group already.
   const records = await dev.readRecords()
@@ -276,6 +292,7 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
     result.snapshots = newcomers.length
   }
 
+  await acked
   state.members = others
   for (const id of Object.keys(state.labels)) if (!others.includes(id)) delete state.labels[id]
   state.lastSyncAt = result.at

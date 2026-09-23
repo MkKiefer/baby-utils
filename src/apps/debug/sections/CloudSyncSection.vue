@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue'
 import { relayBase } from '@/core/cloud/api'
 import { decryptMessage, encryptMessage, newMemberId } from '@/core/cloud/crypto'
 import { pendingDocs, pendingEntries, recordCount } from '@/core/cloud/engine'
-import { cloud, cloudLog, groupKeys, ownServerUrl, POLL_MS, relayHealth } from '@/core/cloud/service'
+import { cloud, cloudLog, groupKeys, ownServerUrl, POLL_MS, relayHealth, STREAM_POLL_MS } from '@/core/cloud/service'
 import { cameraSupported, nativeQrSupported, scannerState } from '@/core/scanner'
 import { getDB } from '@/core/db'
 import { countFields, readSyncedDocs, SYNCED_DOCS, type SyncedDocs } from '@/core/settingsSync'
@@ -36,7 +36,8 @@ async function refresh() {
     API: relayBase(cloud.server),
     'Web Crypto (subtle)': globalThis.crypto?.subtle ? 'yes' : 'no',
     'CompressionStream (deflate-raw)': typeof CompressionStream !== 'undefined' ? 'yes' : 'no — sent uncompressed',
-    'Poll interval': `${POLL_MS / 1000} s while visible`,
+    'Poll interval': `${POLL_MS / 1000} s while visible; ${STREAM_POLL_MS / 60_000} min while the event stream is open`,
+    'Streamed fetch (Response.body ReadableStream)': typeof ReadableStream !== 'undefined' ? 'yes' : 'no — polling only',
     'Camera (pairing)': cameraSupported ? 'yes' : 'no',
     'QR engine': (await nativeQrSupported()) ? 'BarcodeDetector' : 'jsQR',
     Group: c ? (c.enabled ? 'joined, enabled' : 'joined, paused') : 'none',
@@ -128,6 +129,14 @@ defineExpose({ refresh })
   <p v-if="health" class="small" style="word-break: break-all">{{ health }}</p>
   <p v-if="selfTest" class="small">{{ selfTest }}</p>
 
+  <strong class="small">Event stream (GET /events, open while visible; in memory)</strong>
+  <JsonView
+    :value="{
+      ...cloud.stream,
+      openedAt: cloud.stream.openedAt && formatDateTime(cloud.stream.openedAt),
+      lastEventAt: cloud.stream.lastEventAt && formatDateTime(cloud.stream.lastEventAt),
+    }"
+  />
   <strong class="small">Sync state (localStorage sync.state)</strong>
   <JsonView :value="{ ...cloud.state, known: `${Object.keys(cloud.state.known).length} entries` }" />
   <strong class="small">Synced settings (fields with their stamps, IndexedDB kv sync.stamps)</strong>

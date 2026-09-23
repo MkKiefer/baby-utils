@@ -23,10 +23,17 @@ import { emptyState, syncRound, type CloudConfig, type CloudState, type RoundRes
 const CONFIG_KEY = 'sync.config'
 const STATE_KEY = 'sync.state'
 const SERVER_KEY = 'sync.server'
-/** Polling while the app is visible. The relay has no push, so this is the latency. */
+/** Polling while the app is visible and the relay's event stream is not up. */
 export const POLL_MS = 30_000
+/** Safety-net polling while the event stream is up; the stream brings changes right away. */
+export const STREAM_POLL_MS = 5 * 60_000
 /** Wait after a local edit, so a burst of edits goes out as one message. */
-const DEBOUNCE_MS = 1500
+const DEBOUNCE_MS = 800
+/** Wait after a stream event, so a message sent in several chunks is fetched in one round. */
+const NUDGE_MS = 250
+/** Reconnect delays of the event stream (doubling up to the maximum). */
+const RETRY_MIN_MS = 1000
+const RETRY_MAX_MS = 60_000
 /** Local edits that have something for the group. */
 const SYNCED_SCOPES: ChangeScope[] = ['feeds', 'weights', 'profile', 'feed.settings', 'weight.settings']
 
@@ -44,6 +51,15 @@ export const cloud = reactive({
   config: load<CloudConfig>(CONFIG_KEY),
   state: { ...emptyState(), ...load<CloudState>(STATE_KEY) } as CloudState,
   syncing: false,
+  /** The relay's event stream (see `watch` below), for the UI and the Debug app. */
+  stream: {
+    status: 'off' as 'off' | 'connecting' | 'open' | 'retrying' | 'unsupported',
+    openedAt: null as number | null,
+    events: 0,
+    lastEventAt: null as number | null,
+    connects: 0,
+    lastError: null as string | null,
+  },
 })
 
 /** Recent rounds of this session, for the Debug app. */
@@ -129,6 +145,8 @@ export function syncNow(): Promise<void> {
         }
         cloudLog.length = Math.min(cloudLog.length, 30)
         save()
+        // A first join or a rejoin (new member id) changes what the stream listens to.
+        ensureWatch()
       } while (again)
     } finally {
       cloud.syncing = false
@@ -173,6 +191,7 @@ export async function leaveGroup(): Promise<void> {
   cloud.config = null
   cloud.state = emptyState()
   save()
+  ensureWatch()
   try {
     await relay.leave((await groupKeys(config.secret)).token, config.memberId)
   } catch {
@@ -184,6 +203,7 @@ export function setEnabled(enabled: boolean) {
   if (!cloud.config) return
   cloud.config.enabled = enabled
   save()
+  ensureWatch()
   if (enabled) void syncNow()
 }
 
@@ -212,7 +232,10 @@ function checkServer(server: RelayServer): RelayServer {
 function saveServer(server: RelayServer) {
   cloud.server = checkServer(server)
   cloud.state.lastError = null
+  // Another server may well have the event stream.
+  if (cloud.stream.status === 'unsupported') cloud.stream.status = 'off'
   save()
+  ensureWatch()
 }
 
 /** Switches to another sync server (or secret); throws when the address is not a URL. */
@@ -231,9 +254,98 @@ export async function testServer(server: RelayServer): Promise<string | null> {
   }
 }
 
+// ---------------------------------------------------------------------------- event stream
+
+let watch: { key: string; ctrl: AbortController } | null = null
+let nudge: ReturnType<typeof setTimeout> | undefined
+
+/** What the stream should listen to right now; empty when it should be closed. */
+function watchKey(): string {
+  const c = cloud.config
+  if (!c?.enabled || !cloud.state.joined || cloud.stream.status === 'unsupported') return ''
+  if (typeof document === 'undefined' || document.visibilityState !== 'visible') return ''
+  return JSON.stringify([cloud.server, c.secret, c.memberId])
+}
+
+/** Opens, reopens or closes the event stream to match the config and visibility. */
+function ensureWatch() {
+  if (!started) return
+  const key = watchKey()
+  if (watch?.key === key) return
+  watch?.ctrl.abort()
+  watch = null
+  if (cloud.stream.status !== 'unsupported') cloud.stream.status = 'off'
+  cloud.stream.openedAt = null
+  if (!key) return
+  watch = { key, ctrl: new AbortController() }
+  void runWatch(watch.ctrl.signal)
+}
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms)
+    signal.addEventListener('abort', () => (clearTimeout(t), resolve()), { once: true })
+  })
+}
+
+/**
+ * Keeps the stream open, reconnecting with a growing delay. Each event runs a round; so
+ * does every (re)connect, which picks up whatever was sent while the stream was down.
+ */
+async function runWatch(signal: AbortSignal) {
+  const config = cloud.config!
+  const { token } = await groupKeys(config.secret)
+  const s = cloud.stream
+  let delay = RETRY_MIN_MS
+  while (!signal.aborted) {
+    const opened = Date.now()
+    s.status = 'connecting'
+    try {
+      await relay.watch(
+        token,
+        config.memberId,
+        (event) => {
+          if (event === 'ready') {
+            Object.assign(s, { status: 'open', openedAt: Date.now(), lastError: null })
+            s.connects++
+            void syncNow()
+            return
+          }
+          s.events++
+          s.lastEventAt = Date.now()
+          clearTimeout(nudge)
+          nudge = setTimeout(() => void syncNow(), NUDGE_MS)
+        },
+        signal,
+      )
+      s.lastError = 'Closed by the server'
+    } catch (e) {
+      if (signal.aborted) return
+      s.lastError = describeError(e)
+      if (e instanceof RelayError && e.code === 'not_found') {
+        // A relay from before event streams: stay with polling.
+        s.status = 'unsupported'
+        watch = null
+        return
+      }
+      // The relay dropped us: the round rejoins, and ensureWatch then follows the new id.
+      if (e instanceof RelayError && e.code === 'member_unknown') void syncNow()
+    }
+    if (signal.aborted) return
+    s.status = 'retrying'
+    s.openedAt = null
+    if (Date.now() - opened > RETRY_MAX_MS) delay = RETRY_MIN_MS
+    await pause(delay, signal)
+    delay = Math.min(delay * 2, RETRY_MAX_MS)
+  }
+}
+
 let started = false
 
-/** Schedules rounds: on start, while visible, when online again and after local edits. */
+/**
+ * Schedules rounds: on start, on every event of the relay's stream, when visible again, when
+ * online again and after local edits — plus polling as a fallback.
+ */
 export function startCloudSync() {
   if (started || typeof document === 'undefined') return
   started = true
@@ -244,15 +356,26 @@ export function startCloudSync() {
   }
 
   setInterval(() => {
-    if (document.visibilityState === 'visible') void syncNow()
+    if (document.visibilityState !== 'visible') return
+    const streaming = cloud.stream.status === 'open'
+    if (!streaming || Date.now() - (cloud.state.lastSyncAt ?? 0) >= STREAM_POLL_MS) void syncNow()
   }, POLL_MS)
   document.addEventListener('visibilitychange', () => {
+    // Hidden: close the stream (the OS would suspend it anyway). Visible: reopen, and sync.
+    ensureWatch()
     if (document.visibilityState === 'visible') void syncNow()
   })
-  addEventListener('online', () => void syncNow())
+  addEventListener('online', () => {
+    // Reconnect right away instead of waiting out the retry delay.
+    watch?.ctrl.abort()
+    watch = null
+    ensureWatch()
+    void syncNow()
+  })
   onChange((e) => {
     // A merge from our own round announces 'all'; do not answer it with another round.
     if (SYNCED_SCOPES.includes(e.scope) || (e.scope === 'all' && !cloud.syncing)) soon()
   })
+  ensureWatch()
   void syncNow()
 }

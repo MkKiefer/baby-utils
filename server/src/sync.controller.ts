@@ -1,8 +1,9 @@
-import { Controller, Delete, Get, HttpCode, Inject, Param, Post, Query, Req } from '@nestjs/common'
-import type { Request } from 'express'
+import { Controller, Delete, Get, HttpCode, Inject, Param, Post, Query, Req, Res } from '@nestjs/common'
+import type { Request, Response } from 'express'
 import { GroupId, Public } from './auth.ts'
 import { clientAddress, Limits } from './rate-limit.ts'
 import { isMemberId, LIMITS, SyncError, SyncStore } from './store.ts'
+import { Watchers } from './watch.ts'
 
 /**
  * HTTP surface of the relay, mounted at /api/sync/v2 (Traefik routes that prefix here).
@@ -12,6 +13,7 @@ import { isMemberId, LIMITS, SyncError, SyncStore } from './store.ts'
  *   POST   /members/:member   join / heartbeat      → { created, members }
  *   DELETE /members/:member   leave                 → 204
  *   GET    /messages?member=  what is owed to me    → { messages, members }
+ *   GET    /events?member=    event stream          → text/event-stream: ready, message, member
  *   POST   /messages          { from, to?, body }   → { id }
  *   POST   /ack               { member, ids }       → 204
  *   GET    /health                                  → { ok, ...counts }
@@ -55,6 +57,7 @@ export class SyncController {
   constructor(
     @Inject(SyncStore) private readonly store: SyncStore,
     @Inject(Limits) private readonly limits: Limits,
+    @Inject(Watchers) private readonly watchers: Watchers,
   ) {}
 
   @Public()
@@ -65,7 +68,7 @@ export class SyncController {
 
   @Get('health')
   health() {
-    return { ok: true, ...this.store.stats() }
+    return { ok: true, ...this.store.stats(), streams: this.watchers.size }
   }
 
   @Post('members/:member')
@@ -87,6 +90,13 @@ export class SyncController {
   @Get('messages')
   fetch(@GroupId() group: string, @Query('member') member: unknown) {
     return this.store.fetch(group, memberParam(member))
+  }
+
+  /** Stays open; tells the member when to fetch. Not a heartbeat: only fetching keeps it in the group. */
+  @Get('events')
+  events(@GroupId() group: string, @Query('member') member: unknown, @Res() res: Response): void {
+    this.store.member(group, memberParam(member))
+    this.watchers.open(group, member as string, res)
   }
 
   @Post('messages')

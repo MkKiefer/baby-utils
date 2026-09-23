@@ -58,6 +58,9 @@ export class RelayError extends Error {
   }
 }
 
+/** Events on a member's stream: `ready` once connected, then whenever there is something to fetch. */
+export type RelayEvent = 'ready' | 'message' | 'member'
+
 /** Every group call takes the group's relay token (`GroupKeys.token`). */
 export interface RelayClient {
   join(token: string, member: string): Promise<{ created: boolean; members: RelayMember[] }>
@@ -65,12 +68,17 @@ export interface RelayClient {
   fetch(token: string, member: string): Promise<{ messages: RelayMessage[]; members: RelayMember[] }>
   post(token: string, from: string, body: string, to?: string[]): Promise<string | null>
   ack(token: string, member: string, ids: string[]): Promise<void>
+  /**
+   * Listens on the member's event stream until it ends (resolves) or fails (throws). The
+   * stream carries no content; an event only means a round is worth running now.
+   */
+  watch(token: string, member: string, onEvent: (event: RelayEvent) => void, signal: AbortSignal): Promise<void>
   health(): Promise<Record<string, unknown>>
 }
 
 /** `server` is read on every call, so a changed server setting applies right away. */
 export function relayClient(server: () => RelayServer, doFetch: typeof fetch = (...a) => fetch(...a)): RelayClient {
-  async function call<T>(method: string, path: string, token?: string, body?: unknown): Promise<T> {
+  async function request(method: string, path: string, token?: string, body?: unknown, signal?: AbortSignal) {
     const target = server()
     const headers: Record<string, string> = { 'X-Api-Key': target.key }
     if (token) headers.Authorization = `Bearer ${token}`
@@ -84,14 +92,21 @@ export function relayClient(server: () => RelayServer, doFetch: typeof fetch = (
         referrerPolicy: 'no-referrer',
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
+        signal,
       })
     } catch (e) {
+      if (signal?.aborted) throw e
       throw new RelayError(0, navigator.onLine === false ? 'offline' : `network: ${(e as Error).message}`)
     }
     if (!res.ok) {
       const err = (await res.json().catch(() => null)) as { error?: string } | null
       throw new RelayError(res.status, err?.error ?? `http_${res.status}`)
     }
+    return res
+  }
+
+  async function call<T>(method: string, path: string, token?: string, body?: unknown): Promise<T> {
+    const res = await request(method, path, token, body)
     return (res.status === 204 ? undefined : await res.json()) as T
   }
 
@@ -101,6 +116,33 @@ export function relayClient(server: () => RelayServer, doFetch: typeof fetch = (
     fetch: (t, m) => call('GET', `/messages?member=${m}`, t),
     post: async (t, from, body, to) => (await call<{ id: string | null }>('POST', '/messages', t, { from, to, body })).id,
     ack: (t, member, ids) => call('POST', '/ack', t, { member, ids }),
+    watch: async (t, m, onEvent, signal) => {
+      const res = await request('GET', `/events?member=${m}`, t, undefined, signal)
+      if (!res.body) throw new RelayError(0, 'no_stream')
+      await readEvents(res.body, onEvent)
+    },
     health: () => call('GET', '/health'),
+  }
+}
+
+/** Parses a server-sent event stream (only the `event:` lines matter here). */
+export async function readEvents(body: ReadableStream<Uint8Array>, onEvent: (event: RelayEvent) => void): Promise<void> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let event = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) return
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split(/\r?\n/)
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (line.startsWith('event:')) event = line.slice(6).trim()
+      else if (line === '' && event) {
+        onEvent(event as RelayEvent)
+        event = ''
+      }
+    }
   }
 }

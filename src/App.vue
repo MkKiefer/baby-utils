@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import InstallGate from './views/InstallGate.vue'
 import ToastHost from './components/ToastHost.vue'
 import UpdateBanner from './components/UpdateBanner.vue'
+import PullToRefresh from './components/PullToRefresh.vue'
 import { installBypassed, isStandalone } from './core/platform'
 
 const installed = ref(isStandalone() || installBypassed())
@@ -30,6 +31,7 @@ router.afterEach((to, from) => {
         <component :is="Component" :key="route.matched[0]?.path ?? route.path" />
       </Transition>
     </RouterView>
+    <PullToRefresh />
     <UpdateBanner />
     <ToastHost />
   </template>

@@ -66,6 +66,22 @@ describe('SyncStore', () => {
     expect(() => store.post(G, A, 'not base64!')).toThrow('bad_body')
   })
 
+  it('nudges the recipients of a message and the members a newcomer joins', () => {
+    const store = new SyncStore()
+    const nudges: unknown[] = []
+    store.onNudge = (g, members, nudge) => nudges.push([g, members, nudge])
+    store.join(G, A)
+    store.join(G, B)
+    store.join(G, B) // heartbeat: no nudge
+    store.join(G, C)
+    store.post(G, A, 'x', [C])
+    expect(nudges).toEqual([
+      [G, [A], 'member'],
+      [G, [A, B], 'member'],
+      [G, [C], 'message'],
+    ])
+  })
+
   it('reports a heartbeat as not created', () => {
     const store = new SyncStore()
     expect(store.join(G, A).created).toBe(true)

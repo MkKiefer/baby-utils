@@ -66,6 +66,9 @@ export class SyncError extends Error {
   }
 }
 
+/** What a watching member is told about (see watch.ts); never any content. */
+export type Nudge = 'message' | 'member'
+
 export interface MemberInfo {
   id: string
   joinedAt: number
@@ -76,6 +79,8 @@ export class SyncStore {
   state: State
   /** Called after every mutation; persistence debounces it. */
   onChange: () => void = () => {}
+  /** Called when members have something new to fetch; the event streams listen. */
+  onNudge: (groupId: string, members: string[], nudge: Nudge) => void = () => {}
 
   private readonly now: () => number
 
@@ -88,7 +93,8 @@ export class SyncStore {
     return Object.entries(group.members).map(([id, m]) => ({ id, ...m }))
   }
 
-  private member(groupId: string, memberId: string): Group {
+  /** Throws `member_unknown` unless the member is in the group. */
+  member(groupId: string, memberId: string): Group {
     const group = this.state.groups[groupId]
     if (!group?.members[memberId]) throw new SyncError(404, 'member_unknown')
     return group
@@ -125,6 +131,9 @@ export class SyncStore {
     }
     group.members[memberId] = { joinedAt: existing?.joinedAt ?? now, seenAt: now }
     this.onChange()
+    // The others send a newcomer the whole log, so tell them now rather than on their next poll.
+    const others = Object.keys(group.members).filter((id) => id !== memberId)
+    if (!existing && others.length) this.onNudge(groupId, others, 'member')
     return { created: !existing, members: this.members(group) }
   }
 
@@ -161,6 +170,7 @@ export class SyncStore {
     group.members[from]!.seenAt = now
     group.messages.push({ id, from, at: now, body, pending })
     this.onChange()
+    this.onNudge(groupId, pending, 'message')
     return id
   }
 

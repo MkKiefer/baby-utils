@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../../../server/src/app.ts'
 import { groupIdFor } from '../../../server/src/auth.ts'
 import { SyncStore } from '../../../server/src/store.ts'
@@ -6,7 +6,7 @@ import { mergeFeedRecords, mergeWeightRecords } from '../merge'
 import { countFields, mergeSyncedDocs, type SyncedDocs } from '../settingsSync'
 import type { FeedEntry } from '@/apps/feed/logic/types'
 import type { WeightEntry } from '@/apps/weight/logic/types'
-import { normalizeServerUrl, relayBase, relayClient, RelayError, type RelayClient } from './api'
+import { normalizeServerUrl, readEvents, relayBase, relayClient, RelayError, type RelayClient, type RelayEvent } from './api'
 import {
   decryptMessage,
   deriveGroup,
@@ -72,6 +72,21 @@ describe('crypto', () => {
     expect(invite.startsWith('baby-utils-sync:2:')).toBe(true)
     expect(parseInvite(invite)).toEqual({ secret, server })
     expect(parseInvite(invite.slice(0, -4))).toBeNull()
+  })
+})
+
+describe('event stream parsing', () => {
+  it('reports named events across chunk borders and skips comments', async () => {
+    const text = ['event: rea', 'dy\ndata: {}\n\n: ping\n\n', 'event: message\r\ndata: {}\r\n\r\nevent: member\ndata: {}\n\n']
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        for (const t of text) c.enqueue(new TextEncoder().encode(t))
+        c.close()
+      },
+    })
+    const events: RelayEvent[] = []
+    await readEvents(body, (e) => events.push(e))
+    expect(events).toEqual(['ready', 'message', 'member'])
   })
 })
 
@@ -321,6 +336,47 @@ describe('relay sync', () => {
     await a.sync()
     await b.sync()
     expect(b.live()).toEqual(['a1', 'a2'])
+  })
+
+  it('needs no join request once joined: the fetch is the heartbeat', async () => {
+    const { phones } = await group('A', 'B')
+    const [a, b] = phones as [Phone, Phone]
+    for (const p of [a, b, a, b]) await p.sync() // settled: hellos and snapshots delivered
+    const calls: string[] = []
+    a.device.relay = new Proxy(relay, {
+      get: (target, key: keyof RelayClient) => (...args: never[]) => {
+        calls.push(key)
+        return (target[key] as (...a: never[]) => unknown)(...args)
+      },
+    })
+    await a.sync()
+    expect(calls).toEqual(['fetch'])
+  })
+
+  it('nudges a watching phone as soon as something is sent to it', async () => {
+    const { keys, phones } = await group('A', 'B', 'C')
+    const [a, b, c] = phones as [Phone, Phone, Phone]
+    await a.sync()
+    await b.sync()
+    await a.sync()
+    const events: RelayEvent[] = []
+    const ctrl = new AbortController()
+    const until = (e: RelayEvent) =>
+      vi.waitFor(() => expect(events).toContain(e), { timeout: 2000, interval: 10 })
+    const watching = relay.watch(keys.token, b.config.memberId, (e) => events.push(e), ctrl.signal).catch(() => {})
+    await until('ready')
+
+    a.add(feed('n1', 1))
+    await a.sync()
+    await until('message')
+    await c.sync() // a newcomer: B should send it the log
+    await until('member')
+    ctrl.abort()
+    await watching
+
+    // Unknown members get no stream.
+    const err = await relay.watch(keys.token, newMemberId(), () => {}, new AbortController().signal).catch((e: unknown) => e)
+    expect((err as RelayError).code).toBe('member_unknown')
   })
 
   it('syncs settings per field, newest change winning', async () => {

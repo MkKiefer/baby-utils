@@ -8,6 +8,7 @@ import { MIN_API_KEY_LENGTH, RELAY_OPTIONS, type RelayOptions } from './options.
 import { Limits, RateLimitGuard } from './rate-limit.ts'
 import { SyncStore } from './store.ts'
 import { SyncController } from './sync.controller.ts'
+import { Watchers } from './watch.ts'
 
 @Module({})
 export class RelayModule {
@@ -19,6 +20,7 @@ export class RelayModule {
         { provide: RELAY_OPTIONS, useValue: options },
         { provide: SyncStore, useValue: store },
         Limits,
+        Watchers,
         // Global guards run in this order: throttle first, then the API key.
         { provide: APP_GUARD, useClass: RateLimitGuard },
         { provide: APP_GUARD, useClass: ApiKeyGuard },
