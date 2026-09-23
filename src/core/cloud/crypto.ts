@@ -23,8 +23,10 @@ export interface GroupKeys {
   key: CryptoKey
 }
 
-/** Prefix of the invite a QR code or a pasted text carries. */
+/** Prefix of the invite a QR code or a pasted text carries: `<prefix><secret>` (version 1). */
 export const INVITE_PREFIX = 'baby-utils-sync:1:'
+/** Version 2 adds the sync server: `<prefix><secret>.<base64url JSON { u, k }>`. */
+export const INVITE_PREFIX_V2 = 'baby-utils-sync:2:'
 
 const SECRET_BYTES = 32
 const IV_BYTES = 12
@@ -60,15 +62,40 @@ export function newMemberId(): string {
   return randomId(16)
 }
 
-export function inviteFor(secret: string): string {
-  return INVITE_PREFIX + secret
+export interface Invite {
+  secret: string
+  /** The inviting phone's sync server (address, server secret); missing from version 1. */
+  server?: { url: string; key: string }
 }
 
-/** Accepts an invite or a bare secret (whitespace ignored); null when it is neither. */
-export function parseInvite(text: string): string | null {
-  let s = text.replace(/\s+/g, '')
-  if (s.startsWith(INVITE_PREFIX)) s = s.slice(INVITE_PREFIX.length)
-  return /^[A-Za-z0-9_-]{43}$/.test(s) ? s : null
+/**
+ * The invite for a group. With a server, the joining phone also takes over its address and
+ * server secret — the invite is sensitive either way, as it holds the group secret.
+ */
+export function inviteFor(secret: string, server?: { url: string; key: string }): string {
+  if (!server) return INVITE_PREFIX + secret
+  const json = new TextEncoder().encode(JSON.stringify({ u: server.url, k: server.key }))
+  return `${INVITE_PREFIX_V2}${secret}.${toBase64Url(json)}`
+}
+
+const SECRET = /^[A-Za-z0-9_-]{43}$/
+
+/** Accepts an invite (version 1 or 2) or a bare secret, whitespace ignored; null otherwise. */
+export function parseInvite(text: string): Invite | null {
+  const s = text.replace(/\s+/g, '')
+  if (s.startsWith(INVITE_PREFIX_V2)) {
+    const [secret, server] = s.slice(INVITE_PREFIX_V2.length).split('.')
+    if (!secret || !SECRET.test(secret) || !server) return null
+    try {
+      const { u, k } = JSON.parse(new TextDecoder().decode(fromBase64Url(server))) as { u?: unknown; k?: unknown }
+      if (typeof u !== 'string' || typeof k !== 'string') return null
+      return { secret, server: { url: u, key: k } }
+    } catch {
+      return null
+    }
+  }
+  const secret = s.startsWith(INVITE_PREFIX) ? s.slice(INVITE_PREFIX.length) : s
+  return SECRET.test(secret) ? { secret } : null
 }
 
 const encoder = new TextEncoder()

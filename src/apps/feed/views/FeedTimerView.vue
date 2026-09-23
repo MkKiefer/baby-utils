@@ -110,7 +110,12 @@ function openNight() {
 
   <div class="page stack">
     <div class="dial-wrap">
-      <FeedDial :plan="plan" :feeds="store.last24h" :mode="mode" @toggle="mode = mode === 'timer' ? 'day' : 'timer'" />
+      <FeedDial
+        :plan="plan"
+        :feeds="store.last24h"
+        :night="store.settings.night.enabled ? store.settings.night : null"
+        :mode="mode"
+        @toggle="mode = mode === 'timer' ? 'day' : 'timer'" />
       <div class="mode-switch" role="tablist" aria-label="Dial view">
         <button :class="{ on: mode === 'timer' }" role="tab" :aria-selected="mode === 'timer'" @click="mode = 'timer'">Timer</button>
         <button :class="{ on: mode === 'day' }" role="tab" :aria-selected="mode === 'day'" @click="mode = 'day'">

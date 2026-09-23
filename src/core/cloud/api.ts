@@ -1,11 +1,40 @@
 /**
- * Client for the sync relay (server/http.ts). Everything sent is either a derived value or
- * ciphertext from `crypto.ts`. The group's relay token goes in the Authorization header,
- * never in a URL. Same origin by default, so the CSP needs no exception.
+ * Client for the sync relay (server/src/sync.controller.ts). Everything sent is either a
+ * derived value or ciphertext from `crypto.ts`. The server secret goes in `X-Api-Key`, the
+ * group's relay token in the Authorization header — never in a URL.
  */
 
-export const SYNC_API: string =
-  (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_SYNC_API || '/api/sync/v2'
+/** Where the relay's API lives on a sync server. */
+export const SYNC_PATH = '/api/sync/v2'
+
+/** The sync server the user chose: its address and the server secret (the API key). */
+export interface RelayServer {
+  /** Base address such as `https://baby-utils.example.com`; empty means this app's own address. */
+  url: string
+  key: string
+}
+
+/**
+ * Normalises a server address typed by the user (trailing slashes and a pasted API path are
+ * dropped); null when it is not an http(s) URL.
+ */
+export function normalizeServerUrl(text: string): string | null {
+  let url: URL
+  try {
+    url = new URL(text.trim())
+  } catch {
+    return null
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
+  const path = url.pathname.replace(/\/+$/, '').replace(new RegExp(`${SYNC_PATH}$`), '')
+  return url.origin + path
+}
+
+/** The API base for a server; an empty address means the app's own origin. */
+export function relayBase(server: RelayServer): string {
+  const own = typeof location === 'undefined' ? '' : location.origin
+  return (normalizeServerUrl(server.url) ?? own) + SYNC_PATH
+}
 
 export interface RelayMember {
   id: string
@@ -39,14 +68,16 @@ export interface RelayClient {
   health(): Promise<Record<string, unknown>>
 }
 
-export function relayClient(base = SYNC_API, doFetch: typeof fetch = (...a) => fetch(...a)): RelayClient {
+/** `server` is read on every call, so a changed server setting applies right away. */
+export function relayClient(server: () => RelayServer, doFetch: typeof fetch = (...a) => fetch(...a)): RelayClient {
   async function call<T>(method: string, path: string, token?: string, body?: unknown): Promise<T> {
-    const headers: Record<string, string> = {}
+    const target = server()
+    const headers: Record<string, string> = { 'X-Api-Key': target.key }
     if (token) headers.Authorization = `Bearer ${token}`
     if (body !== undefined) headers['Content-Type'] = 'application/json'
     let res: Response
     try {
-      res = await doFetch(base + path, {
+      res = await doFetch(relayBase(target) + path, {
         method,
         cache: 'no-store',
         credentials: 'omit',

@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
  * group secret on the devices, and message bodies are ciphertext it only stores and hands
  * out. A message is kept until every member it was addressed to has acknowledged it.
  *
- * Pure apart from the id generator: persistence lives in `persist.ts`, HTTP in `http.ts`.
+ * Pure apart from the id generator: persistence lives in `persist.ts`, HTTP in `sync.controller.ts`.
  */
 
 export interface Member {
@@ -47,7 +47,7 @@ export const LIMITS = {
   memberTtlMs: 30 * 24 * 3600_000,
 }
 
-/** SHA-256 of the group's access token, base64url (see `groupIdFor` in http.ts). */
+/** SHA-256 of the group's access token, base64url (see `groupIdFor` in auth.ts). */
 const GROUP_ID = /^[A-Za-z0-9_-]{43}$/
 /** 16 random bytes as base64url, chosen by the device. */
 const MEMBER_ID = /^[A-Za-z0-9_-]{22}$/

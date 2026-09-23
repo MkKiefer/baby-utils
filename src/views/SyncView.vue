@@ -1,20 +1,23 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
-import { Copy, Lock, RefreshCw, Share2, UserPlus, Users } from 'lucide-vue-next'
+import { Copy, Eye, EyeOff, Lock, RefreshCw, Server, Share2, UserPlus, Users } from 'lucide-vue-next'
 import AppBar from '@/components/AppBar.vue'
 import QrCode from '@/components/QrCode.vue'
 import ToggleSwitch from '@/components/ToggleSwitch.vue'
 import ConfirmButton from '@/components/ConfirmButton.vue'
-import { inviteFor, parseInvite } from '@/core/cloud/crypto'
+import { inviteFor, parseInvite, type Invite } from '@/core/cloud/crypto'
 import {
   cloud,
   createGroup,
   defaultDeviceLabel,
   joinGroup,
   leaveGroup,
+  ownServerUrl,
   setEnabled,
+  setServer,
   setLabel,
   syncNow,
+  testServer,
 } from '@/core/cloud/service'
 import { cameraSupported, startScanner } from '@/core/scanner'
 import { formatDateTime } from '@/core/time'
@@ -46,6 +49,43 @@ async function run(fn: () => Promise<void>, ok: string) {
   }
 }
 
+// ------------------------------------------------------------------ server
+const serverUrl = ref(cloud.server.url || ownServerUrl())
+const serverKey = ref(cloud.server.key)
+const showKey = ref(false)
+const serverOpen = ref(!cloud.server.key)
+const serverStatus = ref<{ ok: boolean; text: string } | null>(null)
+const serverReady = computed(() => !!cloud.server.key)
+const serverDirty = computed(
+  () => serverUrl.value.trim() !== (cloud.server.url || ownServerUrl()) || serverKey.value.trim() !== cloud.server.key,
+)
+
+async function checkServer() {
+  busy.value = true
+  try {
+    const error = await testServer({ url: serverUrl.value, key: serverKey.value })
+    serverStatus.value = error ? { ok: false, text: error } : { ok: true, text: 'Connected — the server accepts this secret.' }
+  } finally {
+    busy.value = false
+  }
+}
+
+function saveServer() {
+  try {
+    setServer({ url: serverUrl.value, key: serverKey.value })
+    serverUrl.value = cloud.server.url || ownServerUrl()
+    serverStatus.value = null
+    serverOpen.value = false
+    toast('Sync server saved', { tone: 'ok' })
+  } catch (e) {
+    serverStatus.value = { ok: false, text: (e as Error).message }
+  }
+}
+
+function resetServerUrl() {
+  serverUrl.value = ownServerUrl()
+}
+
 function create() {
   void run(() => createGroup(label.value), 'Sync group created')
 }
@@ -65,8 +105,8 @@ async function openJoin() {
   if (!video.value) return
   try {
     stopCamera = await startScanner(video.value, (text) => {
-      const secret = parseInvite(text)
-      if (secret) void join(secret)
+      const invite = parseInvite(text)
+      if (invite) void join(invite)
     })
   } catch (e) {
     joinError.value = (e as Error).message
@@ -78,18 +118,24 @@ function stopScan() {
   stopCamera = null
 }
 
-async function join(secret: string) {
+async function join(invite: Invite) {
   if (busy.value) return
+  if (!invite.server && !serverReady.value) {
+    joinError.value = 'This code does not include a sync server. Enter the server secret above first.'
+    return
+  }
   stopScan()
   if ('vibrate' in navigator) navigator.vibrate(30)
-  await run(() => joinGroup(secret, label.value), 'Joined — syncing')
+  await run(() => joinGroup(invite, label.value), 'Joined — syncing')
+  serverUrl.value = cloud.server.url || ownServerUrl()
+  serverKey.value = cloud.server.key
   step.value = 'intro'
 }
 
 function joinPasted() {
-  const secret = parseInvite(pasted.value)
-  if (!secret) return void (joinError.value = 'That is not a sync code.')
-  void join(secret)
+  const invite = parseInvite(pasted.value)
+  if (!invite) return void (joinError.value = 'That is not a sync code.')
+  void join(invite)
 }
 
 function cancelJoin() {
@@ -101,7 +147,10 @@ onBeforeUnmount(stopScan)
 
 // ------------------------------------------------------------------ joined
 const showInvite = ref(false)
-const invite = computed(() => (cloud.config ? inviteFor(cloud.config.secret) : ''))
+/** The invite carries this phone's server, so the other phone needs no setup. */
+const invite = computed(() =>
+  cloud.config ? inviteFor(cloud.config.secret, { url: cloud.server.url || ownServerUrl(), key: cloud.server.key }) : '',
+)
 
 async function copyInvite() {
   try {
@@ -140,6 +189,57 @@ async function leave() {
     <!-- Single root required: App.vue's <Transition mode="out-in"> can't leave a multi-root view (blank screen). -->
     <AppBar title="Sync" back="/settings" />
     <div class="page stack">
+      <!-- ---------------------------------------------------------------- server -->
+      <div class="card stack server">
+        <button class="server-head" :aria-expanded="serverOpen" @click="serverOpen = !serverOpen">
+          <Server :size="20" />
+          <span class="grow">
+            <strong>Sync server</strong><br />
+            <span class="small muted">
+              {{ cloud.server.url || ownServerUrl() }} ·
+              {{ serverReady ? 'secret set' : 'secret missing' }}
+            </span>
+          </span>
+          <span class="small muted">{{ serverOpen ? 'Hide' : 'Edit' }}</span>
+        </button>
+        <template v-if="serverOpen">
+          <label class="field">
+            <span>Server address</span>
+            <input v-model="serverUrl" class="input" type="url" inputmode="url" autocomplete="off" spellcheck="false" />
+          </label>
+          <button v-if="serverUrl.trim() !== ownServerUrl()" class="btn ghost sm" @click="resetServerUrl">
+            Use this app’s address
+          </button>
+          <label class="field">
+            <span>Server secret</span>
+            <span class="secret">
+              <input
+                v-model="serverKey"
+                class="input"
+                :type="showKey ? 'text' : 'password'"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="API_KEY from the server’s .env"
+              />
+              <button class="btn ghost sm" :aria-label="showKey ? 'Hide secret' : 'Show secret'" @click="showKey = !showKey">
+                <EyeOff v-if="showKey" :size="18" /><Eye v-else :size="18" />
+              </button>
+            </span>
+          </label>
+          <div v-if="serverStatus" class="callout" :class="serverStatus.ok ? 'info' : 'warn'">
+            <p class="small">{{ serverStatus.text }}</p>
+          </div>
+          <div class="two">
+            <button class="btn" :disabled="busy || !serverKey.trim()" @click="checkServer">Test</button>
+            <button class="btn primary" :disabled="busy || !serverDirty" @click="saveServer">Save</button>
+          </div>
+          <p class="tiny faint">
+            The server only accepts apps that know its secret (<code>API_KEY</code> in the server’s <code>.env</code>). It
+            is kept on this phone and included in invites.
+          </p>
+        </template>
+      </div>
+
       <!-- ---------------------------------------------------------------- not set up -->
       <template v-if="!cloud.config && step === 'intro'">
         <div class="callout info">
@@ -157,9 +257,15 @@ async function leave() {
           <input v-model="label" class="input" type="text" maxlength="40" />
         </label>
 
-        <button class="btn primary block lg" :disabled="busy" @click="create"><Users :size="22" /> Start a sync group</button>
+        <button class="btn primary block lg" :disabled="busy || !serverReady" @click="create">
+          <Users :size="22" /> Start a sync group
+        </button>
         <button class="btn block lg" :disabled="busy" @click="openJoin"><UserPlus :size="22" /> Join the other phone’s group</button>
-        <p class="tiny faint hint">Start the group on one phone, then join it from the other by scanning its code.</p>
+        <p class="tiny faint hint">
+          <template v-if="!serverReady">Enter the server secret above to start a group. </template>
+          Start the group on one phone, then join it from the other by scanning its code — the code also sets up the sync
+          server there.
+        </p>
       </template>
 
       <!-- ---------------------------------------------------------------- join -->
@@ -221,7 +327,7 @@ async function leave() {
           <div class="card qr-card"><QrCode :value="invite" /></div>
           <div class="callout warn">
             <p>
-              This code is the key to your data. Anyone who has it can join and read your data. Scan it in person; if you
+              This code is the key to your data and includes the server secret. Anyone who has it can join and read your data. Scan it in person; if you
               have to send it, use a private chat and delete the message afterwards.
             </p>
           </div>
@@ -252,6 +358,42 @@ async function leave() {
 </template>
 
 <style scoped>
+.server {
+  gap: 12px;
+}
+
+.server-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.field > .secret {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-left: 0;
+}
+
+.secret .input {
+  flex: 1;
+  min-width: 0;
+}
+
 .center {
   text-align: center;
 }

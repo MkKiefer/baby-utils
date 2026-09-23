@@ -18,16 +18,18 @@ what it forwards — see [Sync between phones](#sync-between-phones).
 ## Scripts
 
 ```bash
-npm install
+npm install && npm install --prefix server
 npm run dev        # dev server (service worker enabled in dev); proxies /api/sync → :8787
-npm run api        # sync relay on :8787 (second terminal; only needed to try sync)
+npm run api        # sync relay on :8787 (second terminal; needs API_KEY in .env)
 npm run build      # type-check + production build (dist/)
 npm run preview    # serve dist/ on localhost
 npm test           # unit tests of app and api (incl. phones syncing through a real relay)
 ```
 
 The repo holds two projects: the PWA at the root (**app**) and the sync relay in `server/`
-(**api**, dependency-free Node 24 that runs its TypeScript directly). Open
+(**api**, a NestJS 12 application on Node 24; `npm run build --prefix server` compiles it to
+`server/dist`). The relay reads `API_KEY` from the environment or from `.env` (repo root or
+`server/`) and refuses to start without one. Open
 `baby-utils.code-workspace` in VS Code (File → Open Workspace from File…) to get both as
 separate roots, with tasks `app + api: dev`, `test (app + api)`, `typecheck (app + api)` and a
 debug config for the relay.
@@ -42,7 +44,7 @@ Vite build, and the static result is served by unprivileged nginx (non-root, rea
 filesystem) on port 8080.
 
 ```bash
-cp .env.example .env               # set DOMAIN
+cp .env.example .env               # set DOMAIN and API_KEY (openssl rand -base64 32)
 docker compose up -d --build       # → https://baby-utils.$DOMAIN
 ```
 
@@ -50,7 +52,8 @@ Compose runs two containers from the same `Dockerfile`: `web` (the PWA, default 
 `api` (target `api`, the sync relay, state in the `api-data` volume). Neither publishes ports.
 Both join the external `proxy` Docker network and are routed by an existing Traefik instance
 via labels (`websecure` entrypoint): `Host(baby-utils.$DOMAIN) && PathPrefix(/api/sync)` goes
-to `api`, everything else on the host to `web`. Traefik also terminates TLS. The network must exist (`docker network create proxy`) and
+to `api`, everything else on the host to `web`. `api` requires `API_KEY` (compose refuses to
+start without it); only apps that were given this server secret can use the relay. Traefik also terminates TLS. The network must exist (`docker network create proxy`) and
 Traefik must be attached to it. Phones need HTTPS: service workers, installation and
 notifications only work in a secure context (`localhost` is the only exception).
 
@@ -87,13 +90,16 @@ src/
     debug/                 inspectors for every browser feature in use
   views/                   install gate, onboarding, home, settings, sub-app frame
   sw.ts                    precache, offline SPA, notification actions, periodic sync
-server/                    sync relay (api): store.ts (groups, buffer), http.ts, persist.ts, main.ts
+server/src/                sync relay (api, NestJS): store.ts (groups, buffer), sync.controller.ts,
+                           auth.ts (API key guard, relay token), rate-limit.ts, persist.ts, main.ts
 ```
 
 ### Sync between phones
 
-Off by default; Settings → Sync between phones. One phone starts a group, the other joins by
-scanning its QR code (or pasting the code). From then on feeds and weighings sync automatically while the app
+Off by default; Settings → Sync between phones. First set the **sync server**: its address
+(defaults to the app's own address) and the **server secret** — the `API_KEY` from the
+server's `.env`. One phone starts a group, the other joins by scanning its QR code (or pasting
+the code); the code carries the server address and secret, so the second phone needs no setup. From then on feeds and weighings sync automatically while the app
 is open (every 30 s, on opening, and right after an edit).
 
 - **The group is a secret**: 256 random bits, generated on the phone. With HKDF-SHA256 each
@@ -101,6 +107,10 @@ is open (every 30 s, on opening, and right after an edit).
   `Authorization: Bearer`, never in a URL) and an *AES-256-GCM key*. HKDF is one-way, so the
   token reveals nothing about the key. The relay files the group under SHA-256(token), so its
   state file, logs or the Debug app's *group id* are not enough to join, read, ack or kick.
+- **Server secret**: every request carries `X-Api-Key`; without it the relay answers only its
+  liveness probe. It keeps strangers off the server; it is not what protects your data (that
+  is the end-to-end encryption). The CSP allows `connect-src https:` so a phone can use a sync
+  server on another host; the relay answers CORS for any origin (`CORS_ORIGINS` narrows it).
 - **Abuse limits on the relay**: per client address 300 requests/min and 20 new groups/hour
   (behind Traefik, the last `X-Forwarded-For` hop), and at most ~150 MB buffered in total.
   Phones refuse messages that would inflate to more than 32 MB.
@@ -119,8 +129,8 @@ is open (every 30 s, on opening, and right after an edit).
   for the phone. To remove a phone, leave on all phones and start a new group — the old secret
   is then useless. The secret and sync state live in localStorage (`sync.*`), outside backups.
 
-The relay API (`server/http.ts`), under `/api/sync/v2`; every route but `/health` needs
-`Authorization: Bearer <relay token>`:
+The relay API (`server/src/sync.controller.ts`), under `/api/sync/v2`. Every route but
+`/healthz` needs `X-Api-Key: <API_KEY>`; the group routes also `Authorization: Bearer <relay token>`:
 
 | Method | Path | |
 | --- | --- | --- |
@@ -130,6 +140,7 @@ The relay API (`server/http.ts`), under `/api/sync/v2`; every route but `/health
 | `POST` | `/messages` | `{ from, to?, body }` — `body` is ciphertext |
 | `POST` | `/ack` | `{ member, ids }` — delivered; deleted once all have it |
 | `GET` | `/health` | counts only |
+| `GET` | `/healthz` | liveness, no key (container health check) |
 
 ### Adding a sub-app
 

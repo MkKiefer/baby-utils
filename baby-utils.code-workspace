@@ -36,6 +36,13 @@
         "options": { "cwd": "${workspaceFolder:api}" }
       },
       {
+        "label": "api: build",
+        "type": "shell",
+        "command": "npm run build",
+        "problemMatcher": ["$tsc"],
+        "options": { "cwd": "${workspaceFolder:api}" }
+      },
+      {
         "label": "app + api: dev",
         "dependsOn": ["api: dev", "app: dev"],
         "dependsOrder": "parallel",
@@ -66,7 +73,9 @@
         "type": "node",
         "request": "launch",
         "cwd": "${workspaceFolder:api}",
-        "program": "${workspaceFolder:api}/main.ts",
+        "program": "${workspaceFolder:api}/dist/main.js",
+        "preLaunchTask": "api: build",
+        "sourceMaps": true,
         "env": { "PORT": "8787", "DATA_DIR": "./data" },
         "console": "integratedTerminal",
         "skipFiles": ["<node_internals>/**"]

@@ -8,15 +8,24 @@ import type { FeedEntry } from '../logic/types'
 /**
  * Two faces, tap to switch:
  * - timer: the ring is the current interval (age part solid, rhythm extension striped)
- * - day:   a 24h clock with night shading, today's feeds as dots and a "now" hand
+ * - day:   a 24h clock with night shading, the last 24h of feeds as dots and a "now" hand.
+ *          Arcs there have flat ends: a round cap would add ~23 minutes to either end.
  */
-const props = defineProps<{ plan: FeedPlan; feeds: FeedEntry[]; mode: 'timer' | 'day' }>()
+const props = defineProps<{
+  plan: FeedPlan
+  feeds: FeedEntry[]
+  mode: 'timer' | 'day'
+  /** Night window of night mode (minutes after midnight); null shades 20:00–07:00. */
+  night?: { startMin: number; endMin: number } | null
+}>()
 const emit = defineEmits<{ toggle: [] }>()
 
 const C = 160
 const R = 118
 const NIGHT_FROM = 20 * 60
 const NIGHT_TO = 7 * 60
+/** Dots older than this are faded to the minimum, so yesterday cannot pass for today. */
+const DOT_MIN_OPACITY = 0.3
 
 const now = computed(() => props.plan.now)
 const last = computed(() => props.plan.lastFeed)
@@ -60,6 +69,7 @@ const timer = computed(() => {
 // ---------------------------------------------------------------- day face
 const deg24 = (ms: number) => (minutesOfDay(ms) / 1440) * 360
 const day = computed(() => {
+  // Labels sit outside the ring like the timer face's, clear of the centre text.
   const hours = Array.from({ length: 24 }, (_, h) => {
     const deg = h * 15
     return {
@@ -67,17 +77,23 @@ const day = computed(() => {
       major: h % 6 === 0,
       a: polar(C, C, R + 17, deg),
       b: polar(C, C, R + (h % 6 === 0 ? 26 : 21), deg),
-      label: polar(C, C, R - 36, deg),
+      label: polar(C, C, R + 40, deg),
     }
   })
-  const nightStart = (NIGHT_FROM / 1440) * 360
-  const nightEnd = 360 + (NIGHT_TO / 1440) * 360
+  const from = props.night?.startMin ?? NIGHT_FROM
+  const to = props.night?.endMin ?? NIGHT_TO
+  const nightStart = (from / 1440) * 360
+  const nightEnd = ((to <= from ? to + 1440 : to) / 1440) * 360
+  // The ring shows 24 rolling hours: ahead of the hand is yesterday. Where that stretch is
+  // covered by the upcoming interval, yesterday's dots would read as planned feeds — skip them.
+  const hiddenBefore = cycle.value && last.value ? Math.max(now.value, cycle.value.dueAt) - DAY : now.value - DAY
   const dots = props.feeds
-    .filter((f) => f.at > now.value - DAY && f.at <= now.value)
+    .filter((f) => !f.deletedAt && f.at > hiddenBefore && f.at <= now.value)
     .map((f) => ({
       id: f.id,
       p: polar(C, C, R, deg24(f.at)),
-      opacity: 0.45 + 0.55 * (1 - (now.value - f.at) / DAY),
+      opacity: 1 - (1 - DOT_MIN_OPACITY) * ((now.value - f.at) / DAY),
+      last: f.id === last.value?.id,
     }))
   let interval = null
   if (last.value && cycle.value) {
@@ -91,12 +107,14 @@ const day = computed(() => {
     }
   }
   const nowDeg = deg24(now.value)
+  const dueDeg = interval?.due ?? 0
   return {
     hours,
     nightStart,
     nightEnd,
     dots,
     interval,
+    dueTick: { a: polar(C, C, R - 12, dueDeg), b: polar(C, C, R + 12, dueDeg) },
     handA: polar(C, C, R - 20, nowDeg),
     handB: polar(C, C, R + 16, nowDeg),
   }
@@ -184,15 +202,25 @@ const intervalLabel = computed(() => {
           </template>
         </g>
         <template v-if="day.interval">
-          <path :d="arcPath(C, C, R, day.interval.start, day.interval.due)" class="planned" />
-          <path :d="arcPath(C, C, R, day.interval.start, Math.min(day.interval.now, day.interval.due))" class="progress" />
+          <path :d="arcPath(C, C, R, day.interval.start, day.interval.due)" class="planned flat" />
+          <path :d="arcPath(C, C, R, day.interval.start, Math.min(day.interval.now, day.interval.due))" class="progress flat" />
           <path
             v-if="day.interval.now > day.interval.due"
             :d="arcPath(C, C, R, day.interval.due, day.interval.now)"
-            class="progress over"
+            class="progress flat over"
           />
+          <line :x1="day.dueTick.a.x" :y1="day.dueTick.a.y" :x2="day.dueTick.b.x" :y2="day.dueTick.b.y" class="due-tick" />
         </template>
-        <circle v-for="d in day.dots" :key="d.id" :cx="d.p.x" :cy="d.p.y" r="7" class="dot" :style="{ opacity: d.opacity }" />
+        <circle
+          v-for="d in day.dots"
+          :key="d.id"
+          :cx="d.p.x"
+          :cy="d.p.y"
+          :r="d.last ? 8 : 6"
+          class="dot"
+          :class="{ last: d.last }"
+          :style="{ opacity: d.opacity }"
+        />
         <line :x1="day.handA.x" :y1="day.handA.y" :x2="day.handB.x" :y2="day.handB.y" class="hand" />
       </g>
     </svg>
@@ -275,6 +303,16 @@ svg {
   stroke: var(--warn);
 }
 
+.planned.flat,
+.progress.flat {
+  stroke-linecap: butt;
+}
+
+.due-tick {
+  stroke: var(--tone);
+  stroke-width: 3;
+}
+
 .status-due .glow,
 .status-due .knob {
   animation: pulse 1.6s ease-in-out infinite;
@@ -329,6 +367,12 @@ svg {
   fill: var(--accent);
   stroke: var(--surface);
   stroke-width: 3;
+}
+
+.dot.last {
+  fill: var(--surface);
+  stroke: var(--tone);
+  stroke-width: 4;
 }
 
 .hand {

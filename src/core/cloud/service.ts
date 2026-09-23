@@ -6,8 +6,8 @@ import { emitChange, onChange, type ChangeScope } from '../sync'
 import { detectPlatform } from '../platform'
 import { readFeedRecords } from '@/apps/feed/logic/repo'
 import { readWeightRecords } from '@/apps/weight/logic/repo'
-import { relayClient, RelayError } from './api'
-import { deriveGroup, newGroupSecret, newMemberId, type GroupKeys } from './crypto'
+import { normalizeServerUrl, relayClient, RelayError, type RelayServer } from './api'
+import { deriveGroup, newGroupSecret, newMemberId, type GroupKeys, type Invite } from './crypto'
 import { emptyState, syncRound, type CloudConfig, type CloudState, type RoundResult } from './engine'
 
 /**
@@ -16,11 +16,13 @@ import { emptyState, syncRound, type CloudConfig, type CloudState, type RoundRes
  *
  * Config (with the group secret) and state live in localStorage under `sync.*`, outside
  * the `bu.*` prefix, so they are not part of a backup file: restoring a backup on another
- * phone must not clone this device's group membership.
+ * phone must not clone this device's group membership. The sync server (address and
+ * server secret) is kept apart in `sync.server`, so it survives leaving a group.
  */
 
 const CONFIG_KEY = 'sync.config'
 const STATE_KEY = 'sync.state'
+const SERVER_KEY = 'sync.server'
 /** Polling while the app is visible. The relay has no push, so this is the latency. */
 export const POLL_MS = 30_000
 /** Wait after a local edit, so a burst of edits goes out as one message. */
@@ -37,6 +39,8 @@ function load<T>(key: string): T | null {
 }
 
 export const cloud = reactive({
+  /** An empty url means this app's own address (the default server). */
+  server: { url: '', key: '', ...load<RelayServer>(SERVER_KEY) } as RelayServer,
   config: load<CloudConfig>(CONFIG_KEY),
   state: { ...emptyState(), ...load<CloudState>(STATE_KEY) } as CloudState,
   syncing: false,
@@ -50,12 +54,13 @@ function save() {
     if (cloud.config) localStorage.setItem(CONFIG_KEY, JSON.stringify(cloud.config))
     else localStorage.removeItem(CONFIG_KEY)
     localStorage.setItem(STATE_KEY, JSON.stringify(cloud.state))
+    localStorage.setItem(SERVER_KEY, JSON.stringify(cloud.server))
   } catch {
     // Storage full or blocked: the next round recomputes from scratch at worst.
   }
 }
 
-const relay = relayClient()
+const relay = relayClient(() => cloud.server)
 let keys: { secret: string; value: Promise<GroupKeys> } | null = null
 
 export function groupKeys(secret: string): Promise<GroupKeys> {
@@ -72,6 +77,7 @@ export function defaultDeviceLabel(): string {
 function describeError(e: unknown): string {
   if (e instanceof RelayError) {
     if (e.code === 'offline') return 'Offline'
+    if (e.code === 'bad_api_key') return 'The server secret is missing or wrong — check the sync server'
     if (e.code === 'group_full') return 'The group is full'
     if (e.code === 'rate_limited') return 'Too many requests to the sync server — retrying later'
     if (e.code === 'server_buffer_full') return 'The sync server is full — try again later'
@@ -154,8 +160,10 @@ export function createGroup(label: string): Promise<void> {
   return setup(newGroupSecret(), label, false)
 }
 
-export function joinGroup(secret: string, label: string): Promise<void> {
-  return setup(secret, label, true)
+/** Joins with an invite; one that carries a sync server switches this phone to it. */
+export function joinGroup(invite: Invite, label: string): Promise<void> {
+  if (invite.server) saveServer(invite.server)
+  return setup(invite.secret, label, true)
 }
 
 /** Tells the relay to stop holding messages for this device, then forgets the group. */
@@ -187,6 +195,40 @@ export function setLabel(label: string) {
 
 export function relayHealth() {
   return relay.health()
+}
+
+/** The address shown for the default server: this app's own. */
+export function ownServerUrl(): string {
+  return typeof location === 'undefined' ? '' : location.origin
+}
+
+/** Validates a server; the stored url stays empty when it is this app's own address. */
+function checkServer(server: RelayServer): RelayServer {
+  const url = server.url.trim() ? normalizeServerUrl(server.url) : ''
+  if (url === null) throw new Error('The server address must start with https://')
+  return { url: url === ownServerUrl() ? '' : url, key: server.key.trim() }
+}
+
+function saveServer(server: RelayServer) {
+  cloud.server = checkServer(server)
+  cloud.state.lastError = null
+  save()
+}
+
+/** Switches to another sync server (or secret); throws when the address is not a URL. */
+export function setServer(server: RelayServer) {
+  saveServer(server)
+  void syncNow()
+}
+
+/** Checks a server and secret without saving them (`/health` needs the secret). */
+export async function testServer(server: RelayServer): Promise<string | null> {
+  try {
+    await relayClient(() => checkServer(server)).health()
+    return null
+  } catch (e) {
+    return e instanceof RelayError ? describeError(e) : String((e as Error)?.message ?? e)
+  }
 }
 
 let started = false

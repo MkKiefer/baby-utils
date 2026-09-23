@@ -1,13 +1,12 @@
-import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createHandler, groupIdFor, PREFIX } from '../../../server/http.ts'
-import { SyncStore } from '../../../server/store.ts'
+import { createApp } from '../../../server/src/app.ts'
+import { groupIdFor } from '../../../server/src/auth.ts'
+import { SyncStore } from '../../../server/src/store.ts'
 import { mergeFeedRecords, mergeWeightRecords } from '../merge'
 import { countFields, mergeSyncedDocs, type SyncedDocs } from '../settingsSync'
 import type { FeedEntry } from '@/apps/feed/logic/types'
 import type { WeightEntry } from '@/apps/weight/logic/types'
-import { relayClient, type RelayClient } from './api'
+import { normalizeServerUrl, relayBase, relayClient, RelayError, type RelayClient } from './api'
 import {
   decryptMessage,
   deriveGroup,
@@ -61,9 +60,28 @@ describe('crypto', () => {
 
   it('parses invites and bare secrets', () => {
     const secret = newGroupSecret()
-    expect(parseInvite(inviteFor(secret))).toBe(secret)
-    expect(parseInvite(` ${secret.slice(0, 20)}\n${secret.slice(20)} `)).toBe(secret)
+    expect(parseInvite(inviteFor(secret))).toEqual({ secret })
+    expect(parseInvite(` ${secret.slice(0, 20)}\n${secret.slice(20)} `)).toEqual({ secret })
     expect(parseInvite('hello')).toBeNull()
+  })
+
+  it('carries the sync server in a version 2 invite', () => {
+    const secret = newGroupSecret()
+    const server = { url: 'https://sync.example.com', key: 'k€y with spaces' }
+    const invite = inviteFor(secret, server)
+    expect(invite.startsWith('baby-utils-sync:2:')).toBe(true)
+    expect(parseInvite(invite)).toEqual({ secret, server })
+    expect(parseInvite(invite.slice(0, -4))).toBeNull()
+  })
+})
+
+describe('server address', () => {
+  it('normalises what the user types', () => {
+    expect(normalizeServerUrl(' https://a.example/ ')).toBe('https://a.example')
+    expect(normalizeServerUrl('https://a.example/sub/api/sync/v2/')).toBe('https://a.example/sub')
+    expect(normalizeServerUrl('ftp://a.example')).toBeNull()
+    expect(normalizeServerUrl('a.example')).toBeNull()
+    expect(relayBase({ url: 'https://a.example/', key: '' })).toBe('https://a.example/api/sync/v2')
   })
 })
 
@@ -133,16 +151,28 @@ class Phone {
 }
 
 describe('relay sync', () => {
-  let server: Server
+  let app: Awaited<ReturnType<typeof createApp>>
   let relay: RelayClient
+  let url = ''
   const store = new SyncStore()
+  const KEY = 'server-secret-for-tests'
 
   beforeAll(async () => {
-    server = createServer(createHandler(store))
-    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
-    relay = relayClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}${PREFIX}`)
+    app = await createApp({ apiKey: KEY }, store)
+    await app.listen(0, '127.0.0.1')
+    url = (await app.getUrl()).replace('[::1]', '127.0.0.1')
+    relay = relayClient(() => ({ url, key: KEY }))
   })
-  afterAll(() => new Promise<void>((r) => server.close(() => r())))
+  afterAll(() => app.close())
+
+  it('is refused without the right server secret', async () => {
+    const { keys } = await group()
+    const stranger = relayClient(() => ({ url, key: 'not-the-server-secret' }))
+    const err = await stranger.join(keys.token, newMemberId()).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(RelayError)
+    expect((err as RelayError).code).toBe('bad_api_key')
+    expect(store.hasGroup(keys.groupId)).toBe(false)
+  })
 
   async function group(...labels: string[]) {
     const secret = newGroupSecret()

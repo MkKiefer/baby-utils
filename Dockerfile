@@ -1,17 +1,27 @@
+# ---- api-build: compile the NestJS sync relay --------------------------------------
+FROM node:24-alpine AS api-build
+WORKDIR /app/server
+COPY server/package.json server/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+COPY server/ ./
+RUN npm run build && npm prune --omit=dev
+
 # ---- api: the optional sync relay (`docker compose` builds it with target: api) -------
-# Dependency-free Node; it only stores and forwards end-to-end encrypted messages.
+# NestJS; it only stores and forwards end-to-end encrypted messages, for apps that know
+# the server secret (API_KEY).
 FROM node:24-alpine AS api
-WORKDIR /app
-COPY server/package.json server/*.ts ./server/
-RUN rm -f server/*.test.ts && mkdir -p /data && chown node:node /data
+WORKDIR /app/server
+COPY --from=api-build /app/server/package.json ./
+COPY --from=api-build /app/server/node_modules ./node_modules
+COPY --from=api-build /app/server/dist ./dist
+RUN mkdir -p /data && chown node:node /data
 ENV NODE_ENV=production PORT=8787 DATA_DIR=/data
 USER node
 EXPOSE 8787
 VOLUME /data
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1:8787/api/sync/v2/health || exit 1
-WORKDIR /app/server
-CMD ["node", "main.ts"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8787/api/sync/v2/healthz || exit 1
+CMD ["node", "dist/main.js"]
 
 # ---- build: install, test, type-check and bundle the PWA -----------------------------
 FROM node:24-alpine AS build
@@ -19,6 +29,9 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+# The app's tests sync phones through the real relay, so it needs the server's packages too.
+COPY server/package.json server/package-lock.json ./server/
+RUN --mount=type=cache,target=/root/.npm npm ci --prefix server --no-audit --no-fund
 
 COPY . .
 RUN npm test && npm run build

@@ -12,6 +12,8 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "paths": { "@/*": ["./src/*"] }
   },
   "include": ["vite.config.ts", "pwa-assets.config.ts", "src/**/*.test.ts"]

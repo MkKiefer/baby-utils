@@ -1,16 +1,30 @@
 {
   "name": "baby-utils-api",
   "private": true,
-  "version": "0.1.0",
-  "description": "Sync relay for Baby Utils: buffers and forwards end-to-end encrypted messages. No dependencies.",
   "type": "module",
+  "version": "0.2.0",
+  "description": "Sync relay for Baby Utils (NestJS): buffers and forwards end-to-end encrypted messages. Requires an API key.",
   "engines": {
     "node": ">=24.0.0"
   },
   "scripts": {
-    "start": "node main.ts",
-    "dev": "node --watch main.ts",
-    "test": "vitest run --dir .",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "dev": "nest start --watch",
+    "test": "vitest run --root .. server",
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.1.0",
+    "@nestjs/core": "^12.1.0",
+    "@nestjs/platform-express": "^12.1.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^12.0.5",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.6",
+    "typescript": "~5.9.3"
   }
 }

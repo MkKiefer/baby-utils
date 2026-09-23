@@ -1,7 +1,10 @@
-import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import type { INestApplication } from '@nestjs/common'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createHandler, groupIdFor, PREFIX, RateLimiter, type HandlerOptions } from './http.ts'
+import { createApp } from './app.ts'
+import { groupIdFor } from './auth.ts'
+import type { RelayOptions } from './options.ts'
+import { RateLimiter } from './rate-limit.ts'
+import { PREFIX } from './sync.controller.ts'
 import { LIMITS, SyncError, SyncStore } from './store.ts'
 
 const G = 'g'.repeat(43)
@@ -102,25 +105,30 @@ describe('SyncStore', () => {
 })
 
 describe('HTTP', () => {
-  let server: Server
+  let app: INestApplication
   let base = ''
   let store: SyncStore
   const T = 't'.repeat(43)
 
-  async function start(options?: HandlerOptions) {
+  const KEY = 'k'.repeat(32)
+
+  async function start(options?: Partial<RelayOptions>) {
     store = new SyncStore()
-    server = createServer(createHandler(store, options))
-    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
-    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}${PREFIX}`
+    app = await createApp({ apiKey: KEY, ...options }, store)
+    await app.listen(0, '127.0.0.1')
+    base = (await app.getUrl()).replace('[::1]', '127.0.0.1') + PREFIX
   }
-  afterEach(() => new Promise<void>((r) => server.close(() => r())))
+  afterEach(() => app.close())
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   type Json = any
-  const json = async (method: string, path: string, body?: unknown, token: string | null = T) => {
+  const json = async (method: string, path: string, body?: unknown, token: string | null = T, key: string | null = KEY) => {
+    const headers: Record<string, string> = {}
+    if (token) headers.Authorization = `Bearer ${token}`
+    if (key) headers['X-Api-Key'] = key
     const res = await fetch(base + path, {
       method,
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     })
     const text = await res.text()
@@ -163,6 +171,34 @@ describe('HTTP', () => {
     // Knowing the group id (the relay's name for it) is not enough.
     expect((await json('DELETE', `/members/${A}`, undefined, groupIdFor(T))).status).toBe(204)
     expect(Object.keys(store.state.groups[groupIdFor(T)]!.members)).toEqual([A])
+  })
+
+  it('refuses every route but the liveness probe without the API key', async () => {
+    await start()
+    for (const key of [null, 'wrong'.repeat(8), KEY.slice(1)]) {
+      const res = await json('POST', `/members/${A}`, undefined, T, key)
+      expect(res.status).toBe(401)
+      expect(await res.json()).toEqual({ error: 'bad_api_key' })
+      expect((await json('GET', '/health', undefined, null, key)).status).toBe(401)
+    }
+    expect(store.stats().groups).toBe(0)
+    expect(await (await json('GET', '/healthz', undefined, null, null)).json()).toEqual({ ok: true })
+    expect((await json('GET', '/health', undefined, null)).status).toBe(200)
+  })
+
+  it('refuses to start with a short API key', async () => {
+    await expect(createApp({ apiKey: 'short' })).rejects.toThrow('API_KEY')
+  })
+
+  it('answers CORS preflights without the API key', async () => {
+    await start()
+    const res = await fetch(`${base}/messages`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://other.example', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'x-api-key,authorization' },
+    })
+    expect(res.status).toBeLessThan(300)
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://other.example')
+    expect(res.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('x-api-key')
   })
 
   it('answers errors with a code', async () => {

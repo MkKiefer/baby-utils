@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { SYNC_API } from '@/core/cloud/api'
+import { relayBase } from '@/core/cloud/api'
 import { decryptMessage, encryptMessage, newMemberId } from '@/core/cloud/crypto'
 import { pendingDocs, pendingEntries, recordCount } from '@/core/cloud/engine'
-import { cloud, cloudLog, groupKeys, POLL_MS, relayHealth } from '@/core/cloud/service'
+import { cloud, cloudLog, groupKeys, ownServerUrl, POLL_MS, relayHealth } from '@/core/cloud/service'
 import { cameraSupported, nativeQrSupported, scannerState } from '@/core/scanner'
 import { getDB } from '@/core/db'
 import { countFields, readSyncedDocs, SYNCED_DOCS, type SyncedDocs } from '@/core/settingsSync'
@@ -19,6 +19,7 @@ const docs = ref<SyncedDocs>({})
 const health = ref('')
 const selfTest = ref('')
 const revealSecret = ref(false)
+const revealKey = ref(false)
 
 async function readRecords() {
   const db = await getDB()
@@ -31,7 +32,8 @@ async function refresh() {
   const records = await readRecords()
   docs.value = await readSyncedDocs(await getDB())
   info.value = {
-    API: SYNC_API,
+    'Sync server (localStorage sync.server)': cloud.server.url || `${ownServerUrl()} (this app's address, default)`,
+    API: relayBase(cloud.server),
     'Web Crypto (subtle)': globalThis.crypto?.subtle ? 'yes' : 'no',
     'CompressionStream (deflate-raw)': typeof CompressionStream !== 'undefined' ? 'yes' : 'no — sent uncompressed',
     'Poll interval': `${POLL_MS / 1000} s while visible`,
@@ -101,6 +103,14 @@ defineExpose({ refresh })
       <tr v-for="(v, k) in info" :key="k">
         <th>{{ k }}</th>
         <td style="word-break: break-all">{{ v }}</td>
+      </tr>
+      <tr>
+        <th>Server secret (X-Api-Key)</th>
+        <td style="word-break: break-all">
+          <template v-if="!cloud.server.key">not set</template>
+          <template v-else-if="revealKey">{{ cloud.server.key }}</template>
+          <button v-else class="btn sm" @click="revealKey = true">Reveal</button>
+        </td>
       </tr>
       <tr v-if="cloud.config">
         <th>Group secret</th>

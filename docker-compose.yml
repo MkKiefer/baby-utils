@@ -1,6 +1,6 @@
 # docker compose up -d --build → https://baby-utils.$DOMAIN via the external Traefik proxy:
 # `web` serves the PWA, `api` the optional end-to-end encrypted sync relay under /api/sync.
-# Settings come from .env (see .env.example). Requires the external `proxy` network that
+# Settings come from .env (see .env.example); API_KEY is required for the api. Requires the external `proxy` network that
 # Traefik is attached to (docker network create proxy).
 name: baby-utils
 
@@ -30,6 +30,7 @@ services:
 
   # Optional sync API (relay): buffers and forwards end-to-end encrypted messages between the
   # phones of a sync group. It never sees keys or plaintext. Same host, under /api/sync.
+  # Only apps that were given API_KEY (entered in the app under Sync → Sync server) may use it.
   api:
     build:
       context: .
@@ -41,6 +42,9 @@ services:
     cap_drop: [ ALL ]
     security_opt:
       - no-new-privileges:true
+    environment:
+      API_KEY: ${API_KEY:?Set API_KEY in .env (e.g. openssl rand -base64 32)}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
     volumes:
       - api-data:/data
     networks:
