@@ -1,5 +1,6 @@
 import type { FeedEntry } from '@/apps/feed/logic/types'
 import type { WeightEntry } from '@/apps/weight/logic/types'
+import type { DiaperEntry } from '@/apps/diaper/logic/types'
 import type { IncomingRecords, MergeStats } from '../merge'
 import { countFields, foldDocs, type SyncedDocs } from '../settingsSync'
 import { RelayError, type RelayClient, type RelayMember, type RelayMessage } from './api'
@@ -8,8 +9,8 @@ import { decryptMessage, encryptMessage, newMemberId, type GroupKeys } from './c
 /**
  * One relay sync round, free of DOM and storage so it can be tested against the real relay.
  *
- * Every device remembers which version (`updatedAt`) of each synced entry (feeds and
- * weighings) the group already has —
+ * Every device remembers which version (`updatedAt`) of each synced entry (feeds,
+ * weighings and diapers) the group already has —
  * because this device sent it, or because it arrived from the group. A round then:
  *
  *   1. joins the group — only when not joined yet or when the relay has dropped us; otherwise
@@ -74,6 +75,8 @@ export interface SyncPayload {
   feeds: FeedEntry[]
   /** Added with the weight tracker; missing from older app versions, which ignore it. */
   weights?: WeightEntry[]
+  /** Added with the diaper log; missing from older app versions, which ignore it. */
+  diapers?: DiaperEntry[]
   /** Synced settings (see `settingsSync.ts`); missing from app versions before settings sync. */
   docs?: SyncedDocs
 }
@@ -82,6 +85,7 @@ export interface SyncPayload {
 export interface SyncRecords {
   feeds: FeedEntry[]
   weights: WeightEntry[]
+  diapers: DiaperEntry[]
 }
 
 export type SyncKind = keyof SyncRecords
@@ -96,15 +100,16 @@ export interface Device {
   now?: () => number
 }
 
-const KINDS: SyncKind[] = ['feeds', 'weights']
+const KINDS: SyncKind[] = ['feeds', 'weights', 'diapers']
 
 /** Feed ids stay unprefixed, so the `known` map of devices from before weights still applies. */
 export function knownKey(kind: SyncKind, id: string): string {
-  return kind === 'feeds' ? id : `weight:${id}`
+  if (kind === 'feeds') return id
+  return kind === 'weights' ? `weight:${id}` : `diaper:${id}`
 }
 
 export function recordCount(records: SyncRecords): number {
-  return records.feeds.length + records.weights.length
+  return records.feeds.length + records.weights.length + records.diapers.length
 }
 
 /** Entries per message; a year of feeds fits a handful of messages well below the relay cap. */
@@ -133,6 +138,7 @@ export function pendingEntries(records: SyncRecords, known: Record<string, numbe
   return {
     feeds: records.feeds.filter((e) => known[knownKey('feeds', e.id)] !== e.updatedAt),
     weights: records.weights.filter((e) => known[knownKey('weights', e.id)] !== e.updatedAt),
+    diapers: records.diapers.filter((e) => known[knownKey('diapers', e.id)] !== e.updatedAt),
   }
 }
 
@@ -177,6 +183,7 @@ async function send(
       sentAt: now,
       feeds: slice.filter((x) => x.kind === 'feeds').map((x) => x.entry as FeedEntry),
       weights: slice.filter((x) => x.kind === 'weights').map((x) => x.entry as WeightEntry),
+      diapers: slice.filter((x) => x.kind === 'diapers').map((x) => x.entry as DiaperEntry),
     }
     // Settings are small: they go with the first chunk only.
     if (i === 0 && countFields(docs)) payload.docs = docs
@@ -228,7 +235,7 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
 
   // 2. Receive.
   const { messages, members } = owed
-  const incoming = { feeds: [] as FeedEntry[], weights: [] as WeightEntry[] }
+  const incoming = { feeds: [] as FeedEntry[], weights: [] as WeightEntry[], diapers: [] as DiaperEntry[] }
   const incomingDocs: unknown[] = []
   let latest = 0
   for (const msg of messages) {
@@ -237,6 +244,7 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
       if (!isPayload(payload)) throw new Error('bad payload')
       incoming.feeds.push(...payload.feeds)
       if (Array.isArray(payload.weights)) incoming.weights.push(...payload.weights)
+      if (Array.isArray(payload.diapers)) incoming.diapers.push(...payload.diapers)
       if (payload.docs) incomingDocs.push(payload.docs)
       if (typeof payload.label === 'string') state.labels[msg.from] = payload.label.slice(0, 40)
       latest = Math.max(latest, payload.sentAt)

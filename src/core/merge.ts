@@ -4,6 +4,8 @@ import { readFeedRecords } from '@/apps/feed/logic/repo'
 import type { FeedEntry } from '@/apps/feed/logic/types'
 import { readWeightRecords } from '@/apps/weight/logic/repo'
 import type { WeightEntry } from '@/apps/weight/logic/types'
+import { readDiaperRecords } from '@/apps/diaper/logic/repo'
+import { DIAPER_KINDS, type DiaperEntry } from '@/apps/diaper/logic/types'
 import type { Backup } from './backup'
 
 /**
@@ -18,7 +20,7 @@ import type { Backup } from './backup'
  * The result is order-independent and idempotent: importing the same file twice, or each
  * device importing the other's file, converges on the same log.
  *
- * The same rules apply to every synced log — `feeds` and `weights` — through one generic
+ * The same rules apply to every synced log — `feeds`, `weights` and `diapers` — through one generic
  * core. Settings and the baby profile travel with relay sync instead, merged per field
  * (`settingsSync.ts`); a backup file merge leaves them alone, and `restoreBackup` still
  * replaces a whole device when that is what you want.
@@ -141,6 +143,32 @@ const weightKind: MergeKind<WeightEntry> = {
   tieBreak: (e) => JSON.stringify([e.at, e.deletedAt ?? 0, e.grams, e.note ?? '', e.source]),
 }
 
+/** Like `normalizeEntry`, for diaper changes. */
+export function normalizeDiaper(value: unknown): DiaperEntry | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Partial<DiaperEntry>
+  if (typeof raw.id !== 'string' || !raw.id) return null
+  if (typeof raw.at !== 'number' || !Number.isFinite(raw.at)) return null
+  if (!raw.kind || !DIAPER_KINDS.includes(raw.kind)) return null
+  const createdAt = typeof raw.createdAt === 'number' ? raw.createdAt : raw.at
+  const entry: DiaperEntry = {
+    ...raw,
+    id: raw.id,
+    at: raw.at,
+    kind: raw.kind,
+    source: raw.source ?? 'import',
+    createdAt,
+    updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : createdAt,
+  }
+  if (typeof raw.deletedAt !== 'number') delete entry.deletedAt
+  return entry
+}
+
+const diaperKind: MergeKind<DiaperEntry> = {
+  normalize: normalizeDiaper,
+  tieBreak: (e) => JSON.stringify([e.at, e.deletedAt ?? 0, e.kind, e.stool ?? '', e.note ?? '', e.source]),
+}
+
 function newer<T extends Syncable>(kind: MergeKind<T>, a: T, b: T): T {
   if (a.updatedAt !== b.updatedAt) return a.updatedAt > b.updatedAt ? a : b
   return kind.tieBreak(a) >= kind.tieBreak(b) ? a : b
@@ -206,39 +234,55 @@ export function mergeWeightRecords(local: WeightEntry[], incoming: unknown[]): M
   return mergeRecords(weightKind, local, incoming)
 }
 
+export function mergeDiaperRecords(local: DiaperEntry[], incoming: unknown[]): MergeOutcome<DiaperEntry> {
+  return mergeRecords(diaperKind, local, incoming)
+}
+
 /** Records from another device, per synced store. Unknown shapes are skipped, not trusted. */
 export interface IncomingRecords {
   feeds: unknown[]
   weights: unknown[]
+  /** Missing from app versions before the diaper log. */
+  diapers?: unknown[]
 }
 
 /** Reads one store's records out of a backup, tolerating either dump shape. */
-function fromBackup(backup: Backup, name: 'feeds' | 'weights'): unknown[] {
+function fromBackup(backup: Backup, name: 'feeds' | 'weights' | 'diapers'): unknown[] {
   const dump = backup.stores[name]
   if (!dump) return []
   return dump.keyed ? dump.records.map((r) => (r as { value: unknown }).value) : dump.records
 }
 
-/** Merges a backup's feeds and weighings into this device. Leaves settings and profile untouched. */
+/** Merges a backup's feeds, weighings and diapers into this device. Leaves settings and profile untouched. */
 export function mergeBackup(backup: Backup): Promise<MergeStats> {
-  return mergeIncoming({ feeds: fromBackup(backup, 'feeds'), weights: fromBackup(backup, 'weights') }, backup.exportedAt, 'file')
+  return mergeIncoming(
+    { feeds: fromBackup(backup, 'feeds'), weights: fromBackup(backup, 'weights'), diapers: fromBackup(backup, 'diapers') },
+    backup.exportedAt,
+    'file',
+  )
 }
 
 /** Merges records from another device, however they arrived. Stats cover all stores. */
 export async function mergeIncoming(incoming: IncomingRecords, from: number, via: LastMerge['via']): Promise<MergeStats> {
   const db = await getDB()
-  const [localFeeds, localWeights] = await Promise.all([readFeedRecords(db), readWeightRecords(db)])
+  const [localFeeds, localWeights, localDiapers] = await Promise.all([
+    readFeedRecords(db),
+    readWeightRecords(db),
+    readDiaperRecords(db),
+  ])
   const feeds = mergeFeedRecords(localFeeds, incoming.feeds)
   const weights = mergeWeightRecords(localWeights, incoming.weights)
+  const diapers = mergeDiaperRecords(localDiapers, incoming.diapers ?? [])
 
-  if (feeds.writes.length || weights.writes.length) {
-    const tx = db.transaction(['feeds', 'weights'], 'readwrite')
+  if (feeds.writes.length || weights.writes.length || diapers.writes.length) {
+    const tx = db.transaction(['feeds', 'weights', 'diapers'], 'readwrite')
     for (const entry of feeds.writes) await tx.objectStore('feeds').put(plain(entry))
     for (const entry of weights.writes) await tx.objectStore('weights').put(plain(entry))
+    for (const entry of diapers.writes) await tx.objectStore('diapers').put(plain(entry))
     await tx.done
   }
 
-  const stats = addStats(feeds.stats, weights.stats)
+  const stats = addStats(addStats(feeds.stats, weights.stats), diapers.stats)
   const last: LastMerge = { ...stats, at: Date.now(), from, via }
   await db.put('kv', plain(last), LAST_MERGE_KEY)
   // 'all' rather than a store scope: stores only reload on a foreign or global change.

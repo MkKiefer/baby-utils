@@ -2,10 +2,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../../../server/src/app.ts'
 import { groupIdFor } from '../../../server/src/auth.ts'
 import { SyncStore } from '../../../server/src/store.ts'
-import { mergeFeedRecords, mergeWeightRecords } from '../merge'
+import { mergeDiaperRecords, mergeFeedRecords, mergeWeightRecords } from '../merge'
 import { countFields, mergeSyncedDocs, type SyncedDocs } from '../settingsSync'
 import type { FeedEntry } from '@/apps/feed/logic/types'
 import type { WeightEntry } from '@/apps/weight/logic/types'
+import type { DiaperEntry } from '@/apps/diaper/logic/types'
 import { normalizeServerUrl, readEvents, relayBase, relayClient, RelayError, type RelayClient, type RelayEvent } from './api'
 import {
   decryptMessage,
@@ -113,6 +114,7 @@ function weighing(id: string, at: number, grams: number, extra: Partial<WeightEn
 class Phone {
   records = new Map<string, FeedEntry>()
   weights = new Map<string, WeightEntry>()
+  diapers = new Map<string, DiaperEntry>()
   state: CloudState = emptyState()
   docs: SyncedDocs = {}
   config: CloudConfig
@@ -127,13 +129,19 @@ class Phone {
     this.config = { secret, memberId: newMemberId(), label, enabled: true, createdAt: 0 }
     this.device = {
       relay,
-      readRecords: async () => ({ feeds: [...this.records.values()], weights: [...this.weights.values()] }),
+      readRecords: async () => ({
+        feeds: [...this.records.values()],
+        weights: [...this.weights.values()],
+        diapers: [...this.diapers.values()],
+      }),
       merge: async (incoming) => {
         const feeds = mergeFeedRecords([...this.records.values()], incoming.feeds)
         for (const e of feeds.writes) this.records.set(e.id, e)
         const weights = mergeWeightRecords([...this.weights.values()], incoming.weights)
         for (const e of weights.writes) this.weights.set(e.id, e)
-        return { ...feeds.stats, added: feeds.stats.added + weights.stats.added }
+        const diapers = mergeDiaperRecords([...this.diapers.values()], incoming.diapers ?? [])
+        for (const e of diapers.writes) this.diapers.set(e.id, e)
+        return { ...feeds.stats, added: feeds.stats.added + weights.stats.added + diapers.stats.added }
       },
       readDocs: async () => structuredClone(this.docs),
       mergeDocs: async (incoming) => {
@@ -263,6 +271,33 @@ describe('relay sync', () => {
     await b.sync()
     expect(b.weights.get('w2')?.deletedAt).toBe(9500)
     // Everything known: nothing left to send on either side.
+    expect((await a.sync()).sent).toBe(0)
+    expect((await b.sync()).sent).toBe(0)
+  })
+
+  it('syncs diapers alongside the other logs', async () => {
+    const { phones } = await group('A', 'B')
+    const [a, b] = phones as [Phone, Phone]
+    const diaper = (id: string, at: number, extra: Partial<DiaperEntry> = {}): DiaperEntry => ({
+      id,
+      at,
+      kind: 'wet',
+      source: 'app',
+      createdAt: at,
+      updatedAt: at,
+      ...extra,
+    })
+    a.diapers.set('d1', diaper('d1', 1000))
+    await a.sync()
+    await b.sync()
+    await a.sync()
+    await b.sync()
+    expect(b.diapers.get('d1')?.kind).toBe('wet')
+
+    b.diapers.set('d1', diaper('d1', 1000, { kind: 'both', stool: 'yellow', updatedAt: 5000 }))
+    await b.sync()
+    await a.sync()
+    expect(a.diapers.get('d1')).toMatchObject({ kind: 'both', stool: 'yellow' })
     expect((await a.sync()).sent).toBe(0)
     expect((await b.sync()).sent).toBe(0)
   })

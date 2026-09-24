@@ -157,6 +157,20 @@ The app explains this in the feed settings.
 * UI: overview (facts, dip/regain callout, SVG chart with birth line and hover tooltip, recent),
   history (change per weighing, age), settings (unit), home tile, Debug section.
 
+## 5c. Diaper log (`src/apps/diaper`)
+
+* `diapers` store (DB v4): `{ id, at, kind: 'wet'|'dirty'|'both', stool?, note?, source, createdAt, updatedAt, deletedAt? }`.
+  `stool` (meconium, green, yellow, brown, pale, red) only on dirty diapers; pale and red are
+  flagged with a "show your paediatrician" hint for 14 days.
+* Syncs like feeds and weighings (union by id, LWW, tombstones) as an optional `diapers` array
+  in the relay payload and backup merge; older apps ignore it. No settings.
+* Stats (`logic/stats.ts`, pure): today and rolling-24h wet/dirty counts (`both` counts as
+  each), last change, last dirty, 7-day per-day counts. Age guide: ~1 wet per day of life up to
+  day 5, then 6+; 1 → 2 → 3+ dirty until six weeks, no stool guide after that.
+* UI: overview with one-tap Wet / Dirty / Both (Undo toast; colour picker offered right after a
+  dirty one), "earlier or with details" sheet, 7-day bar strip, guide callout, recent; history
+  grouped by day with counts; home tile; Debug section.
+
 ## 6. Debug sub-app (`src/apps/debug`)
 Rule: *every browser feature the app uses gets an inspector here.*
 * IndexedDB: databases → stores → records (JSON), counts, delete record, clear store.

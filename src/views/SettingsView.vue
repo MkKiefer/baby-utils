@@ -185,7 +185,7 @@ onMounted(refreshStorage)
           <Smartphone :size="20" />
           <span class="grow"
             ><strong>Merge from another device</strong><br /><span class="small muted"
-              >Adds their feeds and weighings to yours · safe to repeat</span
+              >Adds their feeds, weighings and diapers to yours · safe to repeat</span
             ></span
           >
         </button>

@@ -2,6 +2,7 @@ import type { DBSchema } from 'idb'
 import type { NotifLogEntry } from './notify/types'
 import type { FeedEntry } from '@/apps/feed/logic/types'
 import type { WeightEntry } from '@/apps/weight/logic/types'
+import type { DiaperEntry } from '@/apps/diaper/logic/types'
 
 /**
  * Single IndexedDB database shared by the shell and every sub-app.
@@ -16,9 +17,10 @@ export interface BabyDB extends DBSchema {
   notifLog: { key: string; value: NotifLogEntry; indexes: { byFiredAt: number } }
   feeds: { key: string; value: FeedEntry; indexes: { byAt: number } }
   weights: { key: string; value: WeightEntry; indexes: { byAt: number } }
+  diapers: { key: string; value: DiaperEntry; indexes: { byAt: number } }
 }
 
-export type StoreName = 'kv' | 'notifLog' | 'feeds' | 'weights'
+export type StoreName = 'kv' | 'notifLog' | 'feeds' | 'weights' | 'diapers'
 
 export interface StoreDecl {
   name: StoreName
@@ -33,12 +35,14 @@ export const DB_NAME = 'baby-utils'
 /**
  * v2: `feeds` entries gained `updatedAt`/`deletedAt` so two devices can be merged.
  * v3: `weights` store for the weight tracker.
+ * v4: `diapers` store for the diaper log.
  */
-export const DB_VERSION = 3
+export const DB_VERSION = 4
 
 export const STORES: StoreDecl[] = [
   { name: 'kv', owner: 'core' },
   { name: 'notifLog', keyPath: 'id', indexes: [{ name: 'byFiredAt', keyPath: 'firedAt' }], owner: 'core' },
   { name: 'feeds', keyPath: 'id', indexes: [{ name: 'byAt', keyPath: 'at' }], owner: 'feed' },
   { name: 'weights', keyPath: 'id', indexes: [{ name: 'byAt', keyPath: 'at' }], owner: 'weight' },
+  { name: 'diapers', keyPath: 'id', indexes: [{ name: 'byAt', keyPath: 'at' }], owner: 'diaper' },
 ]

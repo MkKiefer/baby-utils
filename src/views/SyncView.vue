@@ -245,7 +245,7 @@ async function leave() {
         <div class="callout info">
           <Lock :size="20" />
           <p>
-            Keep feeds, weighings, the baby's profile and app settings in sync between your phones, automatically.
+            Keep feeds, weighings, diapers, the baby's profile and app settings in sync between your phones, automatically.
             Everything is <strong>encrypted on the phone</strong> with a key only your phones share — the sync server just
             passes sealed messages along and cannot read them. Reminder options and the theme stay on each phone; a phone
             that joins takes on the group's settings.
