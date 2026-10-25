@@ -6,6 +6,8 @@ import { readWeightRecords } from '@/apps/weight/logic/repo'
 import type { WeightEntry } from '@/apps/weight/logic/types'
 import { readDiaperRecords } from '@/apps/diaper/logic/repo'
 import { DIAPER_KINDS, type DiaperEntry } from '@/apps/diaper/logic/types'
+import { readDoseRecords, readPlanRecords } from '@/apps/meds/logic/repo'
+import { MAX_TIMES_PER_DAY, type MedDose, type MedPlan } from '@/apps/meds/logic/types'
 import type { Backup } from './backup'
 
 /**
@@ -20,7 +22,8 @@ import type { Backup } from './backup'
  * The result is order-independent and idempotent: importing the same file twice, or each
  * device importing the other's file, converges on the same log.
  *
- * The same rules apply to every synced log — `feeds`, `weights` and `diapers` — through one generic
+ * The same rules apply to every synced log — `feeds`, `weights`, `diapers`, `medPlans` and
+ * `medDoses` — through one generic
  * core. Settings and the baby profile travel with relay sync instead, merged per field
  * (`settingsSync.ts`); a backup file merge leaves them alone, and `restoreBackup` still
  * replaces a whole device when that is what you want.
@@ -169,6 +172,64 @@ const diaperKind: MergeKind<DiaperEntry> = {
   tieBreak: (e) => JSON.stringify([e.at, e.deletedAt ?? 0, e.kind, e.stool ?? '', e.note ?? '', e.source]),
 }
 
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+/** Like `normalizeEntry`, for medication plans. */
+export function normalizePlan(value: unknown): MedPlan | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Partial<MedPlan>
+  if (typeof raw.id !== 'string' || !raw.id || typeof raw.name !== 'string' || !finite(raw.at)) return null
+  if (!finite(raw.timesPerDay) || raw.timesPerDay < 1 || raw.timesPerDay > MAX_TIMES_PER_DAY) return null
+  const createdAt = finite(raw.createdAt) ? raw.createdAt : raw.at
+  const entry: MedPlan = {
+    ...raw,
+    id: raw.id,
+    name: raw.name,
+    at: raw.at,
+    timesPerDay: Math.round(raw.timesPerDay),
+    everyDays: finite(raw.everyDays) && raw.everyDays >= 1 ? Math.round(raw.everyDays) : 1,
+    source: raw.source ?? 'import',
+    createdAt,
+    updatedAt: finite(raw.updatedAt) ? raw.updatedAt : createdAt,
+  }
+  if (!finite(raw.days) || raw.days < 1) delete entry.days
+  if (!Array.isArray(raw.times) || !raw.times.every((t) => typeof t === 'string')) delete entry.times
+  if (!finite(raw.stoppedAt)) delete entry.stoppedAt
+  if (!finite(raw.deletedAt)) delete entry.deletedAt
+  return entry
+}
+
+const planKind: MergeKind<MedPlan> = {
+  normalize: normalizePlan,
+  tieBreak: (e) =>
+    JSON.stringify([e.at, e.deletedAt ?? 0, e.stoppedAt ?? 0, e.name, e.dose ?? '', e.timesPerDay, e.everyDays, e.days ?? 0, e.times ?? [], !!e.remind, !!e.asNeeded, e.note ?? '']),
+}
+
+/** Like `normalizeEntry`, for logged medication doses. */
+export function normalizeDose(value: unknown): MedDose | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Partial<MedDose>
+  if (typeof raw.id !== 'string' || !raw.id || typeof raw.planId !== 'string' || !raw.planId || !finite(raw.at)) return null
+  const createdAt = finite(raw.createdAt) ? raw.createdAt : raw.at
+  const entry: MedDose = {
+    ...raw,
+    id: raw.id,
+    planId: raw.planId,
+    at: raw.at,
+    name: typeof raw.name === 'string' ? raw.name : 'Medication',
+    source: raw.source ?? 'import',
+    createdAt,
+    updatedAt: finite(raw.updatedAt) ? raw.updatedAt : createdAt,
+  }
+  if (!finite(raw.deletedAt)) delete entry.deletedAt
+  return entry
+}
+
+const doseKind: MergeKind<MedDose> = {
+  normalize: normalizeDose,
+  tieBreak: (e) => JSON.stringify([e.at, e.deletedAt ?? 0, e.planId, !!e.skipped, e.note ?? '', e.source]),
+}
+
 function newer<T extends Syncable>(kind: MergeKind<T>, a: T, b: T): T {
   if (a.updatedAt !== b.updatedAt) return a.updatedAt > b.updatedAt ? a : b
   return kind.tieBreak(a) >= kind.tieBreak(b) ? a : b
@@ -238,25 +299,42 @@ export function mergeDiaperRecords(local: DiaperEntry[], incoming: unknown[]): M
   return mergeRecords(diaperKind, local, incoming)
 }
 
+export function mergePlanRecords(local: MedPlan[], incoming: unknown[]): MergeOutcome<MedPlan> {
+  return mergeRecords(planKind, local, incoming)
+}
+
+export function mergeDoseRecords(local: MedDose[], incoming: unknown[]): MergeOutcome<MedDose> {
+  return mergeRecords(doseKind, local, incoming)
+}
+
 /** Records from another device, per synced store. Unknown shapes are skipped, not trusted. */
 export interface IncomingRecords {
   feeds: unknown[]
   weights: unknown[]
   /** Missing from app versions before the diaper log. */
   diapers?: unknown[]
+  /** Missing from app versions before the medication tracker. */
+  medPlans?: unknown[]
+  medDoses?: unknown[]
 }
 
 /** Reads one store's records out of a backup, tolerating either dump shape. */
-function fromBackup(backup: Backup, name: 'feeds' | 'weights' | 'diapers'): unknown[] {
+function fromBackup(backup: Backup, name: 'feeds' | 'weights' | 'diapers' | 'medPlans' | 'medDoses'): unknown[] {
   const dump = backup.stores[name]
   if (!dump) return []
   return dump.keyed ? dump.records.map((r) => (r as { value: unknown }).value) : dump.records
 }
 
-/** Merges a backup's feeds, weighings and diapers into this device. Leaves settings and profile untouched. */
+/** Merges a backup's logs (feeds, weighings, diapers, medication) into this device. Leaves settings and profile untouched. */
 export function mergeBackup(backup: Backup): Promise<MergeStats> {
   return mergeIncoming(
-    { feeds: fromBackup(backup, 'feeds'), weights: fromBackup(backup, 'weights'), diapers: fromBackup(backup, 'diapers') },
+    {
+      feeds: fromBackup(backup, 'feeds'),
+      weights: fromBackup(backup, 'weights'),
+      diapers: fromBackup(backup, 'diapers'),
+      medPlans: fromBackup(backup, 'medPlans'),
+      medDoses: fromBackup(backup, 'medDoses'),
+    },
     backup.exportedAt,
     'file',
   )
@@ -265,24 +343,31 @@ export function mergeBackup(backup: Backup): Promise<MergeStats> {
 /** Merges records from another device, however they arrived. Stats cover all stores. */
 export async function mergeIncoming(incoming: IncomingRecords, from: number, via: LastMerge['via']): Promise<MergeStats> {
   const db = await getDB()
-  const [localFeeds, localWeights, localDiapers] = await Promise.all([
+  const [localFeeds, localWeights, localDiapers, localPlans, localDoses] = await Promise.all([
     readFeedRecords(db),
     readWeightRecords(db),
     readDiaperRecords(db),
+    readPlanRecords(db),
+    readDoseRecords(db),
   ])
   const feeds = mergeFeedRecords(localFeeds, incoming.feeds)
   const weights = mergeWeightRecords(localWeights, incoming.weights)
   const diapers = mergeDiaperRecords(localDiapers, incoming.diapers ?? [])
+  const medPlans = mergePlanRecords(localPlans, incoming.medPlans ?? [])
+  const medDoses = mergeDoseRecords(localDoses, incoming.medDoses ?? [])
+  const all = [feeds, weights, diapers, medPlans, medDoses]
 
-  if (feeds.writes.length || weights.writes.length || diapers.writes.length) {
-    const tx = db.transaction(['feeds', 'weights', 'diapers'], 'readwrite')
+  if (all.some((m) => m.writes.length)) {
+    const tx = db.transaction(['feeds', 'weights', 'diapers', 'medPlans', 'medDoses'], 'readwrite')
     for (const entry of feeds.writes) await tx.objectStore('feeds').put(plain(entry))
     for (const entry of weights.writes) await tx.objectStore('weights').put(plain(entry))
     for (const entry of diapers.writes) await tx.objectStore('diapers').put(plain(entry))
+    for (const entry of medPlans.writes) await tx.objectStore('medPlans').put(plain(entry))
+    for (const entry of medDoses.writes) await tx.objectStore('medDoses').put(plain(entry))
     await tx.done
   }
 
-  const stats = addStats(addStats(feeds.stats, weights.stats), diapers.stats)
+  const stats = all.map((m) => m.stats).reduce(addStats, emptyStats())
   const last: LastMerge = { ...stats, at: Date.now(), from, via }
   await db.put('kv', plain(last), LAST_MERGE_KEY)
   // 'all' rather than a store scope: stores only reload on a foreign or global change.

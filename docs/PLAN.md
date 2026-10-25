@@ -171,6 +171,29 @@ The app explains this in the feed settings.
   dirty one), "earlier or with details" sheet, 7-day bar strip, guide callout, recent; history
   grouped by day with counts; home tile; Debug section.
 
+## 5d. Medication (`src/apps/meds`)
+
+* `medPlans` and `medDoses` stores (DB v5).
+  Plan: `{ id, name, dose?, at (first day, local midnight), timesPerDay, everyDays, days?, times?,
+  remind?, asNeeded?, stoppedAt?, note?, source, createdAt, updatedAt, deletedAt? }` — e.g.
+  "2.5 ml, 3× a day for 5 days". `days` missing = ongoing; `asNeeded` turns `timesPerDay` into a
+  daily maximum. Dose: `{ id, planId, at, name, dose?, skipped?, note?, source, … }`; name and
+  amount are copied at logging time so history survives a deleted plan.
+* Both sync like the other logs (union by id, LWW, tombstones) as optional `medPlans` /
+  `medDoses` arrays in the relay payload and backup merge. Deleting a plan tombstones its doses.
+* Schedule (`logic/schedule.ts`, pure, SW-safe): doses belong to the local day they were given.
+  With fixed times each dose fills the nearest free slot; a free slot before the last dose is
+  *missed* (not overdue), and on the first day times that passed 2 h+ before the plan was
+  created are left out. Next dose "at 14:00", overdue after 30 min. Without fixed times the
+  nth dose fills the nth slot and the next is suggested 24 h / n after the last. Course progress
+  counts given vs planned doses; stopping early shortens the plan.
+* Reminders: a notification provider plans one reminder per open fixed-time slot (today and
+  tomorrow) for plans with `remind`, with a **Given** action handled in the SW. The badge
+  counts plans with an overdue dose.
+* UI: today view with a card per active plan (slots, next due, Given now, earlier/skip, course
+  bar), upcoming and finished plans; history grouped by day with a per-medication filter;
+  home tile; Debug section with per-plan state and planned reminders.
+
 ## 6. Debug sub-app (`src/apps/debug`)
 Rule: *every browser feature the app uses gets an inspector here.*
 * IndexedDB: databases → stores → records (JSON), counts, delete record, clear store.

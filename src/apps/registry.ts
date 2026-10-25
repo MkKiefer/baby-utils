@@ -2,6 +2,7 @@ import type { SubApp } from './types'
 import { feedApp } from './feed/manifest'
 import { weightApp } from './weight/manifest'
 import { diaperApp } from './diaper/manifest'
+import { medsApp } from './meds/manifest'
 import { debugApp } from './debug/manifest'
 
 /**
@@ -9,7 +10,7 @@ import { debugApp } from './debug/manifest'
  * export a manifest, list it here, register SW-safe providers in `providers.ts`, and add
  * any new IndexedDB stores to `core/schema.ts` (bump DB_VERSION).
  */
-export const subApps: SubApp[] = [feedApp, weightApp, diaperApp, debugApp]
+export const subApps: SubApp[] = [feedApp, weightApp, diaperApp, medsApp, debugApp]
 
 export function findApp(id: string): SubApp | undefined {
   return subApps.find((a) => a.id === id)

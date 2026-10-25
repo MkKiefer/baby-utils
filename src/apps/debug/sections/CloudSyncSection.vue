@@ -11,6 +11,7 @@ import { formatDateTime } from '@/core/time'
 import { readFeedRecords } from '@/apps/feed/logic/repo'
 import { readWeightRecords } from '@/apps/weight/logic/repo'
 import { readDiaperRecords } from '@/apps/diaper/logic/repo'
+import { readDoseRecords, readPlanRecords } from '@/apps/meds/logic/repo'
 import JsonView from '../components/JsonView.vue'
 
 /** Relay sync: config, derived ids, what is pending, the relay's health and a crypto self-test. */
@@ -24,8 +25,14 @@ const revealKey = ref(false)
 
 async function readRecords() {
   const db = await getDB()
-  const [feeds, weights, diapers] = await Promise.all([readFeedRecords(db), readWeightRecords(db), readDiaperRecords(db)])
-  return { feeds, weights, diapers }
+  const [feeds, weights, diapers, medPlans, medDoses] = await Promise.all([
+    readFeedRecords(db),
+    readWeightRecords(db),
+    readDiaperRecords(db),
+    readPlanRecords(db),
+    readDoseRecords(db),
+  ])
+  return { feeds, weights, diapers, medPlans, medDoses }
 }
 
 async function refresh() {
@@ -54,7 +61,7 @@ async function refresh() {
       'Entries known to the group': `${Object.keys(cloud.state.known).length} of ${recordCount(records)}`,
       'Pending to send': (() => {
         const p = pendingEntries(records, cloud.state.known)
-        return `${p.feeds.length} feeds, ${p.weights.length} weighings, ${p.diapers.length} diapers`
+        return `${p.feeds.length} feeds, ${p.weights.length} weighings, ${p.diapers.length} diapers, ${p.medPlans.length} med plans, ${p.medDoses.length} doses`
       })(),
       'Settings fields pending to send': String(countFields(pendingDocs(docs.value, cloud.state.knownDocs ?? {}))),
     })
@@ -77,17 +84,18 @@ async function runSelfTest() {
   try {
     const keys = await groupKeys(cloud.config?.secret ?? 'A'.repeat(43))
     const from = newMemberId()
-    const { feeds, weights, diapers } = await readRecords()
-    const body = await encryptMessage(keys, from, { v: 1, feeds, weights, diapers })
-    const back = (await decryptMessage(keys, from, body)) as { feeds: unknown[]; weights: unknown[]; diapers: unknown[] }
+    const records = await readRecords()
+    const { feeds, weights, diapers, medPlans, medDoses } = records
+    const body = await encryptMessage(keys, from, { v: 1, ...records })
+    const back = (await decryptMessage(keys, from, body)) as Record<keyof typeof records, unknown[]>
     let tamperRejected = false
     try {
       await decryptMessage(keys, newMemberId(), body)
     } catch {
       tamperRejected = true
     }
-    const ok = back.feeds.length === feeds.length && back.weights.length === weights.length && back.diapers.length === diapers.length && tamperRejected
-    selfTest.value = `${ok ? 'OK' : 'MISMATCH'} — ${feeds.length} feeds + ${weights.length} weighings + ${diapers.length} diapers → ${body.length} chars, wrong sender ${
+    const ok = (Object.keys(records) as (keyof typeof records)[]).every((k) => back[k].length === records[k].length) && tamperRejected
+    selfTest.value = `${ok ? 'OK' : 'MISMATCH'} — ${feeds.length} feeds + ${weights.length} weighings + ${diapers.length} diapers + ${medPlans.length + medDoses.length} med records → ${body.length} chars, wrong sender ${
       tamperRejected ? 'rejected' : 'ACCEPTED'
     }, ${Math.round(performance.now() - t0)} ms`
   } catch (e) {

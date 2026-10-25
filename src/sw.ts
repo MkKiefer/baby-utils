@@ -8,6 +8,9 @@ import { applyBadge, collectPlan, notificationOptions, processDue } from './core
 import { PERIODIC_SYNC_TAG } from './core/constants'
 import { addFeed } from './apps/feed/logic/repo'
 import { FED_ACTION } from './apps/feed/logic/plan'
+import { addDose } from './apps/meds/logic/repo'
+import { planIdFromReminder } from './apps/meds/logic/schedule'
+import { MED_GIVEN_ACTION } from './apps/meds/logic/types'
 
 declare const self: ServiceWorkerGlobalScope
 
@@ -47,7 +50,7 @@ self.addEventListener('periodicsync', (event) => {
 // --- Notification clicks --------------------------------------------------------------
 self.addEventListener('notificationclick', (event) => {
   const notification = event.notification
-  const data = (notification.data ?? {}) as { url?: string }
+  const data = (notification.data ?? {}) as { url?: string; id?: string }
   notification.close()
 
   event.waitUntil(
@@ -56,6 +59,15 @@ self.addEventListener('notificationclick', (event) => {
         const db = await getDB()
         await addFeed(db, { at: Date.now(), source: 'notification' })
         emitChange('feeds')
+        const plan = await collectPlan(db, Date.now())
+        await applyBadge(plan.badge)
+        return
+      }
+      const medPlanId = event.action === MED_GIVEN_ACTION && data.id ? planIdFromReminder(data.id) : null
+      if (medPlanId) {
+        const db = await getDB()
+        await addDose(db, { planId: medPlanId, at: Date.now(), source: 'notification' })
+        emitChange('meds')
         const plan = await collectPlan(db, Date.now())
         await applyBadge(plan.badge)
         return

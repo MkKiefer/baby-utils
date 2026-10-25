@@ -61,7 +61,9 @@ async function toggle(name: StoreName) {
 }
 
 function scopeFor(name: StoreName) {
-  return name === 'feeds' || name === 'weights' || name === 'diapers' ? name : name === 'notifLog' ? 'notifications' : 'all'
+  if (name === 'feeds' || name === 'weights' || name === 'diapers') return name
+  if (name === 'medPlans' || name === 'medDoses') return 'meds'
+  return name === 'notifLog' ? 'notifications' : 'all'
 }
 
 async function deleteRecord(name: StoreName, key: IDBValidKey) {

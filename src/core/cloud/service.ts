@@ -7,6 +7,7 @@ import { detectPlatform } from '../platform'
 import { readFeedRecords } from '@/apps/feed/logic/repo'
 import { readWeightRecords } from '@/apps/weight/logic/repo'
 import { readDiaperRecords } from '@/apps/diaper/logic/repo'
+import { readDoseRecords, readPlanRecords } from '@/apps/meds/logic/repo'
 import { normalizeServerUrl, relayClient, RelayError, type RelayServer } from './api'
 import { deriveGroup, newGroupSecret, newMemberId, type GroupKeys, type Invite } from './crypto'
 import { emptyState, syncRound, type CloudConfig, type CloudState, type RoundResult } from './engine'
@@ -36,7 +37,7 @@ const NUDGE_MS = 250
 const RETRY_MIN_MS = 1000
 const RETRY_MAX_MS = 60_000
 /** Local edits that have something for the group. */
-const SYNCED_SCOPES: ChangeScope[] = ['feeds', 'weights', 'diapers', 'profile', 'feed.settings', 'weight.settings']
+const SYNCED_SCOPES: ChangeScope[] = ['feeds', 'weights', 'diapers', 'meds', 'profile', 'feed.settings', 'weight.settings']
 
 function load<T>(key: string): T | null {
   try {
@@ -128,12 +129,14 @@ export function syncNow(): Promise<void> {
               relay,
               readRecords: async () => {
                 const db = await getDB()
-                const [feeds, weights, diapers] = await Promise.all([
+                const [feeds, weights, diapers, medPlans, medDoses] = await Promise.all([
                   readFeedRecords(db),
                   readWeightRecords(db),
                   readDiaperRecords(db),
+                  readPlanRecords(db),
+                  readDoseRecords(db),
                 ])
-                return { feeds, weights, diapers }
+                return { feeds, weights, diapers, medPlans, medDoses }
               },
               merge: (incoming, from) => mergeIncoming(incoming, from, 'cloud'),
               readDocs: async () => readSyncedDocs(await getDB()),

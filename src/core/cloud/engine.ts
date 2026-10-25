@@ -1,6 +1,7 @@
 import type { FeedEntry } from '@/apps/feed/logic/types'
 import type { WeightEntry } from '@/apps/weight/logic/types'
 import type { DiaperEntry } from '@/apps/diaper/logic/types'
+import type { MedDose, MedPlan } from '@/apps/meds/logic/types'
 import type { IncomingRecords, MergeStats } from '../merge'
 import { countFields, foldDocs, type SyncedDocs } from '../settingsSync'
 import { RelayError, type RelayClient, type RelayMember, type RelayMessage } from './api'
@@ -10,7 +11,7 @@ import { decryptMessage, encryptMessage, newMemberId, type GroupKeys } from './c
  * One relay sync round, free of DOM and storage so it can be tested against the real relay.
  *
  * Every device remembers which version (`updatedAt`) of each synced entry (feeds,
- * weighings and diapers) the group already has —
+ * weighings, diapers and medication) the group already has —
  * because this device sent it, or because it arrived from the group. A round then:
  *
  *   1. joins the group — only when not joined yet or when the relay has dropped us; otherwise
@@ -77,6 +78,9 @@ export interface SyncPayload {
   weights?: WeightEntry[]
   /** Added with the diaper log; missing from older app versions, which ignore it. */
   diapers?: DiaperEntry[]
+  /** Added with the medication tracker; missing from older app versions, which ignore them. */
+  medPlans?: MedPlan[]
+  medDoses?: MedDose[]
   /** Synced settings (see `settingsSync.ts`); missing from app versions before settings sync. */
   docs?: SyncedDocs
 }
@@ -86,6 +90,8 @@ export interface SyncRecords {
   feeds: FeedEntry[]
   weights: WeightEntry[]
   diapers: DiaperEntry[]
+  medPlans: MedPlan[]
+  medDoses: MedDose[]
 }
 
 export type SyncKind = keyof SyncRecords
@@ -100,16 +106,22 @@ export interface Device {
   now?: () => number
 }
 
-const KINDS: SyncKind[] = ['feeds', 'weights', 'diapers']
+const KINDS: SyncKind[] = ['feeds', 'weights', 'diapers', 'medPlans', 'medDoses']
+
+const KNOWN_PREFIX: Record<Exclude<SyncKind, 'feeds'>, string> = {
+  weights: 'weight',
+  diapers: 'diaper',
+  medPlans: 'medplan',
+  medDoses: 'meddose',
+}
 
 /** Feed ids stay unprefixed, so the `known` map of devices from before weights still applies. */
 export function knownKey(kind: SyncKind, id: string): string {
-  if (kind === 'feeds') return id
-  return kind === 'weights' ? `weight:${id}` : `diaper:${id}`
+  return kind === 'feeds' ? id : `${KNOWN_PREFIX[kind]}:${id}`
 }
 
 export function recordCount(records: SyncRecords): number {
-  return records.feeds.length + records.weights.length + records.diapers.length
+  return KINDS.reduce((n, kind) => n + records[kind].length, 0)
 }
 
 /** Entries per message; a year of feeds fits a handful of messages well below the relay cap. */
@@ -135,10 +147,14 @@ function isPayload(value: unknown): value is SyncPayload {
 
 /** Entries whose current version the group has not seen. */
 export function pendingEntries(records: SyncRecords, known: Record<string, number>): SyncRecords {
+  const pending = <K extends SyncKind>(kind: K) =>
+    (records[kind] as SyncRecords[K][number][]).filter((e) => known[knownKey(kind, e.id)] !== e.updatedAt) as SyncRecords[K]
   return {
-    feeds: records.feeds.filter((e) => known[knownKey('feeds', e.id)] !== e.updatedAt),
-    weights: records.weights.filter((e) => known[knownKey('weights', e.id)] !== e.updatedAt),
-    diapers: records.diapers.filter((e) => known[knownKey('diapers', e.id)] !== e.updatedAt),
+    feeds: pending('feeds'),
+    weights: pending('weights'),
+    diapers: pending('diapers'),
+    medPlans: pending('medPlans'),
+    medDoses: pending('medDoses'),
   }
 }
 
@@ -184,6 +200,8 @@ async function send(
       feeds: slice.filter((x) => x.kind === 'feeds').map((x) => x.entry as FeedEntry),
       weights: slice.filter((x) => x.kind === 'weights').map((x) => x.entry as WeightEntry),
       diapers: slice.filter((x) => x.kind === 'diapers').map((x) => x.entry as DiaperEntry),
+      medPlans: slice.filter((x) => x.kind === 'medPlans').map((x) => x.entry as MedPlan),
+      medDoses: slice.filter((x) => x.kind === 'medDoses').map((x) => x.entry as MedDose),
     }
     // Settings are small: they go with the first chunk only.
     if (i === 0 && countFields(docs)) payload.docs = docs
@@ -235,7 +253,7 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
 
   // 2. Receive.
   const { messages, members } = owed
-  const incoming = { feeds: [] as FeedEntry[], weights: [] as WeightEntry[], diapers: [] as DiaperEntry[] }
+  const incoming: SyncRecords = { feeds: [], weights: [], diapers: [], medPlans: [], medDoses: [] }
   const incomingDocs: unknown[] = []
   let latest = 0
   for (const msg of messages) {
@@ -245,6 +263,8 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
       incoming.feeds.push(...payload.feeds)
       if (Array.isArray(payload.weights)) incoming.weights.push(...payload.weights)
       if (Array.isArray(payload.diapers)) incoming.diapers.push(...payload.diapers)
+      if (Array.isArray(payload.medPlans)) incoming.medPlans.push(...payload.medPlans)
+      if (Array.isArray(payload.medDoses)) incoming.medDoses.push(...payload.medDoses)
       if (payload.docs) incomingDocs.push(payload.docs)
       if (typeof payload.label === 'string') state.labels[msg.from] = payload.label.slice(0, 40)
       latest = Math.max(latest, payload.sentAt)

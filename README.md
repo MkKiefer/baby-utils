@@ -80,7 +80,7 @@ src/
     sync.ts                BroadcastChannel change events (page ↔ SW ↔ tabs)
     cloud/                 optional relay sync: crypto.ts (E2E), api.ts, engine.ts (one
                            round, testable), service.ts (storage, scheduling, UI state)
-    merge.ts               union-by-id merge of feeds, weighings and diapers (backup files and relay sync)
+    merge.ts               union-by-id merge of feeds, weighings, diapers and medication (backup files and relay sync)
     age.ts, time.ts, platform.ts, pwa.ts, backup.ts, wakeLock.ts, chime.ts, storage.ts
   apps/
     registry.ts            UI manifests of all sub-apps (home tiles, routes, tabs)
@@ -88,6 +88,8 @@ src/
     feed/                  logic/ (pure + IndexedDB repo), views/, components/, store.ts
     weight/                weight tracker: weighings in grams, kg or lb/oz display, chart
     diaper/                diaper log: wet/dirty/both, stool colour, daily counts vs age guide
+    meds/                  medication plans (n× a day, every n days, for n days or ongoing, as needed),
+                           doses given/skipped, fixed-time reminders
     debug/                 inspectors for every browser feature in use
   views/                   install gate, onboarding, home, settings, sub-app frame
   sw.ts                    precache, offline SPA, notification actions, periodic sync
@@ -100,7 +102,7 @@ server/src/                sync relay (api, NestJS): store.ts (groups, buffer), 
 Off by default; Settings → Sync between phones. First set the **sync server**: its address
 (defaults to the app's own address) and the **server secret** — the `API_KEY` from the
 server's `.env`. One phone starts a group, the other joins by scanning its QR code (or pasting
-the code); the code carries the server address and secret, so the second phone needs no setup. From then on feeds, weighings and diapers sync automatically while the app
+the code); the code carries the server address and secret, so the second phone needs no setup. From then on feeds, weighings, diapers and medication sync automatically while the app
 is open (every 30 s, on opening, and right after an edit).
 
 - **The group is a secret**: 256 random bits, generated on the phone. With HKDF-SHA256 each

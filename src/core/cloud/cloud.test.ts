@@ -2,11 +2,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../../../server/src/app.ts'
 import { groupIdFor } from '../../../server/src/auth.ts'
 import { SyncStore } from '../../../server/src/store.ts'
-import { mergeDiaperRecords, mergeFeedRecords, mergeWeightRecords } from '../merge'
+import { mergeDiaperRecords, mergeDoseRecords, mergeFeedRecords, mergePlanRecords, mergeWeightRecords } from '../merge'
 import { countFields, mergeSyncedDocs, type SyncedDocs } from '../settingsSync'
 import type { FeedEntry } from '@/apps/feed/logic/types'
 import type { WeightEntry } from '@/apps/weight/logic/types'
 import type { DiaperEntry } from '@/apps/diaper/logic/types'
+import type { MedDose, MedPlan } from '@/apps/meds/logic/types'
 import { normalizeServerUrl, readEvents, relayBase, relayClient, RelayError, type RelayClient, type RelayEvent } from './api'
 import {
   decryptMessage,
@@ -115,6 +116,8 @@ class Phone {
   records = new Map<string, FeedEntry>()
   weights = new Map<string, WeightEntry>()
   diapers = new Map<string, DiaperEntry>()
+  medPlans = new Map<string, MedPlan>()
+  medDoses = new Map<string, MedDose>()
   state: CloudState = emptyState()
   docs: SyncedDocs = {}
   config: CloudConfig
@@ -133,6 +136,8 @@ class Phone {
         feeds: [...this.records.values()],
         weights: [...this.weights.values()],
         diapers: [...this.diapers.values()],
+        medPlans: [...this.medPlans.values()],
+        medDoses: [...this.medDoses.values()],
       }),
       merge: async (incoming) => {
         const feeds = mergeFeedRecords([...this.records.values()], incoming.feeds)
@@ -141,7 +146,12 @@ class Phone {
         for (const e of weights.writes) this.weights.set(e.id, e)
         const diapers = mergeDiaperRecords([...this.diapers.values()], incoming.diapers ?? [])
         for (const e of diapers.writes) this.diapers.set(e.id, e)
-        return { ...feeds.stats, added: feeds.stats.added + weights.stats.added + diapers.stats.added }
+        const plans = mergePlanRecords([...this.medPlans.values()], incoming.medPlans ?? [])
+        for (const e of plans.writes) this.medPlans.set(e.id, e)
+        const doses = mergeDoseRecords([...this.medDoses.values()], incoming.medDoses ?? [])
+        for (const e of doses.writes) this.medDoses.set(e.id, e)
+        const added = [feeds, weights, diapers, plans, doses].reduce((n, m) => n + m.stats.added, 0)
+        return { ...feeds.stats, added }
       },
       readDocs: async () => structuredClone(this.docs),
       mergeDocs: async (incoming) => {
@@ -298,6 +308,38 @@ describe('relay sync', () => {
     await b.sync()
     await a.sync()
     expect(a.diapers.get('d1')).toMatchObject({ kind: 'both', stool: 'yellow' })
+    expect((await a.sync()).sent).toBe(0)
+    expect((await b.sync()).sent).toBe(0)
+  })
+
+  it('syncs medication plans and doses', async () => {
+    const { phones } = await group('A', 'B')
+    const [a, b] = phones as [Phone, Phone]
+    const plan: MedPlan = {
+      id: 'p1',
+      name: 'Amoxicillin',
+      dose: '2.5 ml',
+      at: 0,
+      timesPerDay: 3,
+      everyDays: 1,
+      days: 5,
+      source: 'app',
+      createdAt: 1000,
+      updatedAt: 1000,
+    }
+    a.medPlans.set('p1', plan)
+    a.medDoses.set('d1', { id: 'd1', planId: 'p1', at: 2000, name: 'Amoxicillin', source: 'app', createdAt: 2000, updatedAt: 2000 })
+    await a.sync()
+    await b.sync()
+    await a.sync()
+    await b.sync()
+    expect(b.medPlans.get('p1')?.name).toBe('Amoxicillin')
+    expect(b.medDoses.get('d1')?.planId).toBe('p1')
+
+    b.medPlans.set('p1', { ...plan, stoppedAt: 4000, updatedAt: 5000 })
+    await b.sync()
+    await a.sync()
+    expect(a.medPlans.get('p1')?.stoppedAt).toBe(4000)
     expect((await a.sync()).sent).toBe(0)
     expect((await b.sync()).sent).toBe(0)
   })
