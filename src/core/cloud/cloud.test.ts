@@ -112,6 +112,10 @@ function weighing(id: string, at: number, grams: number, extra: Partial<WeightEn
   return { id, at, grams, source: 'app', createdAt: at, updatedAt: at, ...extra }
 }
 
+function medPlan(id: string): MedPlan {
+  return { id, name: 'Amoxicillin', at: 0, timesPerDay: 3, everyDays: 1, days: 5, source: 'app', createdAt: 1000, updatedAt: 1000 }
+}
+
 class Phone {
   records = new Map<string, FeedEntry>()
   weights = new Map<string, WeightEntry>()
@@ -123,6 +127,9 @@ class Phone {
   config: CloudConfig
   device: Device
 
+  /** Simulates an app version from before the medication tracker. */
+  legacy = false
+
   constructor(
     relay: RelayClient,
     readonly keys: GroupKeys,
@@ -130,8 +137,12 @@ class Phone {
     label: string,
   ) {
     this.config = { secret, memberId: newMemberId(), label, enabled: true, createdAt: 0 }
+    const phone = this
     this.device = {
       relay,
+      get kinds() {
+        return phone.legacy ? (['feeds', 'weights', 'diapers'] as const).slice() : undefined
+      },
       readRecords: async () => ({
         feeds: [...this.records.values()],
         weights: [...this.weights.values()],
@@ -146,9 +157,10 @@ class Phone {
         for (const e of weights.writes) this.weights.set(e.id, e)
         const diapers = mergeDiaperRecords([...this.diapers.values()], incoming.diapers ?? [])
         for (const e of diapers.writes) this.diapers.set(e.id, e)
-        const plans = mergePlanRecords([...this.medPlans.values()], incoming.medPlans ?? [])
+        const meds = !this.legacy
+        const plans = mergePlanRecords([...this.medPlans.values()], meds ? (incoming.medPlans ?? []) : [])
         for (const e of plans.writes) this.medPlans.set(e.id, e)
-        const doses = mergeDoseRecords([...this.medDoses.values()], incoming.medDoses ?? [])
+        const doses = mergeDoseRecords([...this.medDoses.values()], meds ? (incoming.medDoses ?? []) : [])
         for (const e of doses.writes) this.medDoses.set(e.id, e)
         const added = [feeds, weights, diapers, plans, doses].reduce((n, m) => n + m.stats.added, 0)
         return { ...feeds.stats, added }
@@ -342,6 +354,53 @@ describe('relay sync', () => {
     expect(a.medPlans.get('p1')?.stoppedAt).toBe(4000)
     expect((await a.sync()).sent).toBe(0)
     expect((await b.sync()).sent).toBe(0)
+  })
+
+  it('resends medication to a phone that updates from an older app version', async () => {
+    const { phones } = await group('A', 'B')
+    const [a, b] = phones as [Phone, Phone]
+    b.legacy = true
+    await a.sync()
+    await b.sync()
+    await a.sync()
+
+    a.medPlans.set('p1', medPlan('p1'))
+    await a.sync()
+    await b.sync()
+    expect(b.medPlans.size).toBe(0) // the old app ignores it
+
+    b.legacy = false // B updates
+    await b.sync()
+    await a.sync()
+    await b.sync()
+    expect(b.medPlans.get('p1')?.name).toBe('Amoxicillin')
+    // Settles: nothing more to send.
+    await a.sync()
+    expect((await b.sync()).sent).toBe(0)
+    expect((await a.sync()).sent).toBe(0)
+  })
+
+  it('heals phones that synced before devices announced what they understand', async () => {
+    const { phones } = await group('A', 'B')
+    const [a, b] = phones as [Phone, Phone]
+    await a.sync()
+    await b.sync()
+    await a.sync()
+    a.medPlans.set('p1', medPlan('p1'))
+    await a.sync()
+    await b.sync()
+    // State as left by the previous app version: B never got p1, A thinks the group has it.
+    b.medPlans.clear()
+    for (const p of phones) {
+      const s = p.state as unknown as Record<string, unknown>
+      delete s.kinds
+      delete s.memberKinds
+    }
+    await a.sync()
+    await b.sync()
+    await a.sync()
+    await b.sync()
+    expect(b.medPlans.get('p1')?.name).toBe('Amoxicillin')
   })
 
   it('accepts messages from app versions that predate weights', async () => {

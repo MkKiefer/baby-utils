@@ -22,6 +22,11 @@ import { decryptMessage, encryptMessage, newMemberId, type GroupKeys } from './c
  *   4. sends the whole log to members that joined since the last round, so a new phone
  *      gets the history the relay never buffered for it.
  *
+ * Every message also says which kinds of entries its sender understands. An app version
+ * that predates a kind drops those entries, yet the sender counts them as delivered. So when
+ * a member's list grows (it updated), it gets the whole log once more, and a device that
+ * updated itself says hello right away so the others notice.
+ *
  * Merging is the usual union by id with `updatedAt` LWW, so duplicates are harmless.
  * Synced settings ride along the same way, per field (see `settingsSync.ts`).
  */
@@ -62,6 +67,13 @@ export interface CloudState {
   members: string[]
   /** Other members' device names, from their decrypted messages. */
   labels: Record<string, string>
+  /** Kinds this device understood when it last told the group; missing before kinds were announced. */
+  kinds?: SyncKind[]
+  /**
+   * Member id → kinds it last said it understands ([] for versions that do not say). A member
+   * we have not heard from yet has no entry.
+   */
+  memberKinds?: Record<string, string[]>
   /** This device has joined the relay at least once with the current member id. */
   joined: boolean
   lastSyncAt: number | null
@@ -73,6 +85,8 @@ export interface SyncPayload {
   v: 1
   label: string
   sentAt: number
+  /** Kinds of entries the sender understands; missing from versions before it was added. */
+  kinds?: SyncKind[]
   feeds: FeedEntry[]
   /** Added with the weight tracker; missing from older app versions, which ignore it. */
   weights?: WeightEntry[]
@@ -104,6 +118,8 @@ export interface Device {
   /** Merges settings from the group; returns how many fields changed here. */
   mergeDocs(docs: SyncedDocs): Promise<number>
   now?: () => number
+  /** Kinds this device understands; all of them unless a test simulates an old version. */
+  kinds?: SyncKind[]
 }
 
 const KINDS: SyncKind[] = ['feeds', 'weights', 'diapers', 'medPlans', 'medDoses']
@@ -131,6 +147,7 @@ export function emptyState(): CloudState {
   return {
     known: {},
     knownDocs: {},
+    memberKinds: {},
     members: [],
     labels: {},
     joined: false,
@@ -188,8 +205,9 @@ async function send(
   to?: string[],
 ) {
   const now = dev.now?.() ?? Date.now()
-  // Chunk across both kinds, so a message never exceeds CHUNK entries in total.
-  const items = KINDS.flatMap((kind) => records[kind].map((entry) => ({ kind, entry })))
+  // Chunk across all kinds, so a message never exceeds CHUNK entries in total.
+  const kinds = dev.kinds ?? KINDS
+  const items = kinds.flatMap((kind) => records[kind].map((entry) => ({ kind, entry })))
   let delivered = false
   for (let i = 0; i === 0 || i < items.length; i += CHUNK) {
     const slice = items.slice(i, i + CHUNK)
@@ -197,6 +215,7 @@ async function send(
       v: 1,
       label: config.label,
       sentAt: now,
+      kinds: [...kinds],
       feeds: slice.filter((x) => x.kind === 'feeds').map((x) => x.entry as FeedEntry),
       weights: slice.filter((x) => x.kind === 'weights').map((x) => x.entry as WeightEntry),
       diapers: slice.filter((x) => x.kind === 'diapers').map((x) => x.entry as DiaperEntry),
@@ -255,6 +274,11 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
   const { messages, members } = owed
   const incoming: SyncRecords = { feeds: [], weights: [], diapers: [], medPlans: [], medDoses: [] }
   const incomingDocs: unknown[] = []
+  // State from before kinds were announced: its members may have missed entries of any kind,
+  // so each of them gets the whole log once, as soon as it says what it understands.
+  const memberKinds = (state.memberKinds ??= Object.fromEntries(state.members.map((id) => [id, []])))
+  /** Known members that now understand more than before: they may have missed entries. */
+  const widened = new Set<string>()
   let latest = 0
   for (const msg of messages) {
     try {
@@ -267,6 +291,12 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
       if (Array.isArray(payload.medDoses)) incoming.medDoses.push(...payload.medDoses)
       if (payload.docs) incomingDocs.push(payload.docs)
       if (typeof payload.label === 'string') state.labels[msg.from] = payload.label.slice(0, 40)
+      const said = Array.isArray(payload.kinds) ? payload.kinds.filter((k) => typeof k === 'string') : []
+      const before = memberKinds[msg.from]
+      if (before && said.some((k) => KINDS.includes(k) && !before.includes(k))) {
+        widened.add(msg.from)
+      }
+      memberKinds[msg.from] = said
       latest = Math.max(latest, payload.sentAt)
       result.received++
     } catch {
@@ -298,14 +328,18 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
 
   // 3. Send changes to everyone (on a fresh join also an empty hello, so others learn our name).
   const others = members.map((m) => m.id).filter((id) => id !== config.memberId)
-  const newcomers = others.filter((id) => !state.members.includes(id))
+  const newcomers = others.filter((id) => !state.members.includes(id) || widened.has(id))
+  // This device understands more than it last told the group (it was updated): say so.
+  const supported = dev.kinds ?? KINDS
+  const announce = !state.kinds || supported.some((k) => !state.kinds!.includes(k))
   const delta = pendingEntries(records, state.known)
   const deltaCount = recordCount(delta)
   const docDelta = pendingDocs(docs, state.knownDocs)
   const docCount = countFields(docDelta)
   let everyoneHasAll = false
-  if (others.length && (deltaCount || docCount || created)) {
+  if (others.length && (deltaCount || docCount || created || announce)) {
     if (await send(dev, keys, config, delta, docDelta)) {
+      state.kinds = [...supported]
       markKnown(state, delta)
       markDocs(state.knownDocs, docDelta)
       result.sent = deltaCount
@@ -321,7 +355,9 @@ export async function syncRound(dev: Device, keys: GroupKeys, config: CloudConfi
   }
 
   await acked
+  if (!others.length) state.kinds = [...supported]
   state.members = others
+  for (const id of Object.keys(memberKinds)) if (!others.includes(id)) delete memberKinds[id]
   for (const id of Object.keys(state.labels)) if (!others.includes(id)) delete state.labels[id]
   state.lastSyncAt = result.at
   state.lastError = null
