@@ -24,6 +24,8 @@ export interface MedPlan {
   remind?: boolean
   /** Given when needed, up to `timesPerDay` a day, instead of on a schedule. */
   asNeeded?: boolean
+  /** Give it with a feed: the Feed timer shows it when it is due with the next feed. */
+  withFeed?: boolean
   /** Ended before the planned last day (epoch ms). */
   stoppedAt?: number
   note?: string

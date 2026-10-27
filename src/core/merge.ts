@@ -202,7 +202,7 @@ export function normalizePlan(value: unknown): MedPlan | null {
 const planKind: MergeKind<MedPlan> = {
   normalize: normalizePlan,
   tieBreak: (e) =>
-    JSON.stringify([e.at, e.deletedAt ?? 0, e.stoppedAt ?? 0, e.name, e.dose ?? '', e.timesPerDay, e.everyDays, e.days ?? 0, e.times ?? [], !!e.remind, !!e.asNeeded, e.note ?? '']),
+    JSON.stringify([e.at, e.deletedAt ?? 0, e.stoppedAt ?? 0, e.name, e.dose ?? '', e.timesPerDay, e.everyDays, e.days ?? 0, e.times ?? [], !!e.remind, !!e.asNeeded, e.note ?? '', !!e.withFeed]),
 }
 
 /** Like `normalizeEntry`, for logged medication doses. */

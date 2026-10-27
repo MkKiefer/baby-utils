@@ -34,6 +34,7 @@ const days = ref(5)
 const fixed = ref(false)
 const times = ref<string[]>([])
 const remind = ref(false)
+const withFeed = ref(false)
 const note = ref('')
 
 watch(
@@ -51,6 +52,7 @@ watch(
     fixed.value = !!plan?.times?.length
     times.value = plan?.times?.length ? [...plan.times] : defaultTimes(timesPerDay.value)
     remind.value = !!plan?.remind
+    withFeed.value = !!plan?.withFeed
     note.value = plan?.note ?? ''
   },
   { immediate: true },
@@ -86,6 +88,7 @@ const draft = computed<NewPlan>(() => {
     out.times = [...times.value].sort()
     if (remind.value) out.remind = true
   }
+  if (scheduled.value && withFeed.value) out.withFeed = true
   if (note.value.trim()) out.note = note.value.trim()
   return out
 })
@@ -104,7 +107,7 @@ function save() {
   if (!canSave.value) return
   if (props.plan) {
     // Keep what the form does not edit (id, stop, timestamps); drop fields it cleared.
-    const { dose: _d, asNeeded: _a, days: _n, times: _t, remind: _r, note: _o, ...base } = props.plan
+    const { dose: _d, asNeeded: _a, days: _n, times: _t, remind: _r, withFeed: _f, note: _o, ...base } = props.plan
     emit('save', { ...base, ...draft.value })
   } else {
     emit('create', draft.value)
@@ -220,6 +223,12 @@ const everyOptions = [
         <div v-if="fixed" class="row toggle">
           <span class="grow"><strong>Remind me</strong><br /><span class="small muted">A notification at each time</span></span>
           <ToggleSwitch v-model="remind" label="Remind me" />
+        </div>
+        <div class="row toggle">
+          <span class="grow"
+            ><strong>Give with a feed</strong><br /><span class="small muted">Shown in the Feed timer when it's due with the next feed</span></span
+          >
+          <ToggleSwitch v-model="withFeed" label="Give with a feed" />
         </div>
       </template>
 

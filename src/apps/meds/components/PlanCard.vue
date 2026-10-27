@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Bell, Check, Clock, Pencil, StickyNote, X } from 'lucide-vue-next'
+import { Bell, Check, Clock, Milk, Pencil, StickyNote, X } from 'lucide-vue-next'
 import { formatClock, formatSpan } from '@/core/time'
 import type { PlanView } from '../store'
 import { describeSchedule } from '../logic/format'
@@ -61,6 +61,7 @@ const canGive = computed(() => today.value.doseDay && !(plan.value.asNeeded && t
         <p class="tiny faint">
           {{ describeSchedule(plan) }}
           <Bell v-if="plan.remind" :size="11" aria-label="Reminders on" />
+          <template v-if="plan.withFeed && !plan.asNeeded"> · <Milk :size="11" aria-hidden="true" /> with a feed</template>
         </p>
       </div>
       <button class="icon-btn" aria-label="Edit plan" @click="emit('edit')"><Pencil :size="18" /></button>

@@ -289,6 +289,35 @@ export function planIdFromReminder(id: string): string | null {
   return m ? m[1]! : null
 }
 
+/** Without a planned feed, doses due this soon are shown as "with the next feed". */
+export const WITH_FEED_WINDOW_MS = 90 * MINUTE
+
+export interface WithFeedDose {
+  plan: MedPlan
+  today: PlanDay
+}
+
+/**
+ * Active scheduled plans marked "with a feed" whose next dose belongs to the coming feed:
+ * due before the feed after that one would be closer (half an interval past the next feed),
+ * or overdue. `feed` is the next feed's due time and the interval; null when none is planned.
+ */
+export function dueWithFeed(
+  plans: MedPlan[],
+  doses: MedDose[],
+  now: number,
+  feed: { dueAt: number; intervalMs: number } | null,
+): WithFeedDose[] {
+  const horizon = feed ? Math.max(now, feed.dueAt) + feed.intervalMs / 2 : now + WITH_FEED_WINDOW_MS
+  const out: WithFeedDose[] = []
+  for (const plan of plans) {
+    if (plan.deletedAt || !plan.withFeed || plan.asNeeded || planStatus(plan, now) !== 'active') continue
+    const today = planDay(plan, doses, now, now)
+    if (today.next && today.next.at < horizon) out.push({ plan, today })
+  }
+  return out.sort((a, b) => a.today.next!.at - b.today.next!.at)
+}
+
 /** Plans with reminders whose current dose is overdue: their contribution to the badge. */
 export function overdueCount(plans: MedPlan[], doses: MedDose[], now: number): number {
   return plans.filter((p) => !p.deletedAt && p.remind && planDay(p, doses, now, now).next?.overdue).length

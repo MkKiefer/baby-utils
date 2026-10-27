@@ -13,6 +13,7 @@ import KindPicker from '../components/KindPicker.vue'
 import FeedEarlierSheet from '../components/FeedEarlierSheet.vue'
 import FeedEditSheet from '../components/FeedEditSheet.vue'
 import FeedNextIntervalSheet from '../components/FeedNextIntervalSheet.vue'
+import MedsWithFeed from '@/apps/meds/components/MedsWithFeed.vue'
 import { KIND_LABEL, type FeedEntry, type FeedKind } from '../logic/types'
 
 const store = useFeedStore()
@@ -172,6 +173,7 @@ function openNight() {
       </div>
     </button>
 
+    <MedsWithFeed :feed-due-at="plan.lastFeed ? (plan.cycles[0]?.dueAt ?? null) : null" :interval-min="plan.totalMin" />
     <KindPicker v-model="kind" :suggested="store.suggestedKind" />
     <button class="btn primary block lg fed" :disabled="busy" @click="fedNow">Fed now</button>
     <button class="btn ghost block" @click="earlierOpen = true">Fed earlier…</button>

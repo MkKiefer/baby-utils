@@ -33,6 +33,7 @@ function cleanedPlan<T extends Partial<MedPlan>>(plan: T): T {
     delete next.remind
   }
   if (!next.asNeeded) delete next.asNeeded
+  if (next.asNeeded || !next.withFeed) delete next.withFeed
   if (!next.remind) delete next.remind
   if (!next.days) delete next.days
   if (!next.dose) delete next.dose

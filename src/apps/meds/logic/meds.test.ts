@@ -5,6 +5,7 @@ import {
   addDays,
   courseProgress,
   defaultTimes,
+  dueWithFeed,
   isDoseDay,
   overdueCount,
   planDay,
@@ -106,6 +107,38 @@ describe('schedule', () => {
     expect(defaultTimes(3)).toEqual(['08:00', '14:00', '20:00'])
     expect(defaultTimes(6)).toEqual(['02:00', '06:00', '10:00', '14:00', '18:00', '22:00'])
     expect(addDays(DAY0, 3)).toBe(at(3, 0))
+  })
+})
+
+describe('with a feed', () => {
+  const p = plan({ withFeed: true, times: ['08:00', '14:00', '20:00'] })
+  const morning = [dose('a', at(1, 8, 10))]
+
+  it('shows the dose that belongs to the coming feed', () => {
+    const feed = (h: number, m = 0) => ({ dueAt: at(1, h, m), intervalMs: 3 * HOUR })
+    // 14:00 is closer to a 13:30 feed than to the one after (16:30).
+    expect(dueWithFeed([p], morning, at(1, 11), feed(13, 30)).map((d) => d.today.next!.at)).toEqual([at(1, 14)])
+    // A feed at 11:30 is followed by one at 14:30, which is the better match.
+    expect(dueWithFeed([p], morning, at(1, 11), feed(11, 30))).toEqual([])
+    // Not given yet: still shown once overdue.
+    expect(dueWithFeed([p], [], at(1, 11), feed(11, 30))).toHaveLength(1)
+    // Without a planned feed: due within the next 90 minutes.
+    expect(dueWithFeed([p], morning, at(1, 12, 45), null)).toHaveLength(1)
+    expect(dueWithFeed([p], morning, at(1, 12), null)).toEqual([])
+  })
+
+  it('ignores other plans and finished days', () => {
+    const now = at(1, 13)
+    const feed = { dueAt: at(1, 14), intervalMs: 3 * HOUR }
+    expect(dueWithFeed([{ ...p, withFeed: undefined }], morning, now, feed)).toEqual([])
+    expect(dueWithFeed([{ ...p, asNeeded: true }], [], now, feed)).toEqual([])
+    expect(dueWithFeed([p], morning, at(9, 13), feed)).toEqual([])
+    const allGiven = [...morning, dose('b', at(1, 14)), dose('c', at(1, 20))]
+    expect(dueWithFeed([p], allGiven, at(1, 21), { dueAt: at(1, 22), intervalMs: 3 * HOUR })).toEqual([])
+  })
+
+  it('without fixed times, offers the first dose of the day', () => {
+    expect(dueWithFeed([plan({ withFeed: true, timesPerDay: 1 })], [], at(1, 6), null)).toHaveLength(1)
   })
 })
 

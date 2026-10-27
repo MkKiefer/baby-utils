@@ -10,6 +10,7 @@ import { setThemeColorOverride } from '@/core/theme'
 import { useFeedStore } from '../store'
 import { useFeedActions } from '../useFeedActions'
 import FeedEarlierSheet from '../components/FeedEarlierSheet.vue'
+import MedsWithFeed from '@/apps/meds/components/MedsWithFeed.vue'
 
 /**
  * Night mode: black, dim amber, screen kept on. The page stays alive, so the chime at
@@ -112,6 +113,7 @@ function exit() {
     </main>
 
     <footer>
+      <MedsWithFeed night :feed-due-at="plan.lastFeed ? (cycle?.dueAt ?? null) : null" :interval-min="plan.totalMin" />
       <button class="fed" @click="logFeed()">Fed now</button>
       <button class="earlier" @click="earlierOpen = true">Fed earlier…</button>
     </footer>
